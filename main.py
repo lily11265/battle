@@ -43,6 +43,7 @@ from mafia import get_mafia_game, MafiaJoinView
 
 from skills.skill_manager import skill_manager
 from skills.skill_effects import skill_effects
+import battle_admin  # battle_admin.py에 스킬 연동 함수들 추가됨
 
 # 로깅 설정
 logging.basicConfig(
@@ -389,10 +390,25 @@ class BotManager:
                 await asyncio.sleep(30)
 
     async def shutdown(self):
-        """봇 종료 처리"""
+        """봇 안전 종료 (스킬 시스템 및 모든 컴포넌트 포함)"""
         logger.info("봇 종료 시작...")
         self._shutdown_event.set()
         
+        # 1단계: 스킬 시스템 및 캐시 정리 (순차 처리)
+        try:
+            await skill_manager.force_save()
+            await skill_effects.clear_cache()
+            logger.info("스킬 시스템 데이터 저장 완료")
+        except Exception as e:
+            logger.error(f"스킬 시스템 정리 오류: {e}")
+        
+        try:
+            cache_manager.save_all_caches()
+            logger.info("모든 캐시 저장 완료")
+        except Exception as e:
+            logger.error(f"캐시 저장 오류: {e}")
+        
+        # 2단계: 시스템 컴포넌트 종료 (병렬 처리)
         shutdown_tasks = []
         
         if self.scheduler and self.scheduler.running:
@@ -409,16 +425,25 @@ class BotManager:
                 asyncio.create_task(self._shutdown_bamboo_system())
             )
         
+        # 병렬 종료 작업 실행
         if shutdown_tasks:
             try:
                 await asyncio.wait_for(
                     asyncio.gather(*shutdown_tasks, return_exceptions=True),
                     timeout=10.0
                 )
+                logger.info("시스템 컴포넌트 종료 완료")
             except asyncio.TimeoutError:
                 logger.warning("일부 종료 작업이 타임아웃되었습니다")
+            except Exception as e:
+                logger.error(f"시스템 컴포넌트 종료 중 오류: {e}")
         
-        thread_pool.shutdown(wait=False, cancel_futures=True)
+        # 3단계: 스레드 풀 정리
+        try:
+            thread_pool.shutdown(wait=False, cancel_futures=True)
+            logger.info("스레드 풀 종료 완료")
+        except Exception as e:
+            logger.error(f"스레드 풀 종료 오류: {e}")
         
         logger.info("봇 종료 완료")
 
@@ -458,52 +483,102 @@ async def shutdown_bot():
 # 이벤트 핸들러
 @bot.event
 async def on_ready():
-    """봇 준비 완료 이벤트"""
+    """봇 준비 완료 이벤트 (스킬 시스템 통합)"""
     logger.info(f"봇이 준비되었습니다! {bot.user}로 로그인됨")
     bot_manager.reconnect_attempts = 0
     
     try:
+        # 기존 시스템 초기화
         synced = await tree.sync()
         logger.info(f"{len(synced)}개의 명령어가 동기화되었습니다")
         
         await bot_manager.initialize()
-
-        await setup_skill_system(bot)
-        # === 스킬 시스템 초기화 추가 ===
-        from skills.skill import SkillCog
-        await bot.add_cog(SkillCog(bot))
-        logger.info("스킬 시스템이 초기화되었습니다")
         
-        # 몹 세팅 초기화
+        # === 스킬 시스템 초기화 ===
+        from skills.skill import SkillCog, SkillInfoCog
+        await bot.add_cog(SkillCog(bot))
+        await bot.add_cog(SkillInfoCog(bot))
+        logger.info("✅ 스킬 시스템이 초기화되었습니다")
+        
+        # 몹 세팅 시스템 초기화
         global mob_setting_handler
+        bot.mob_setting_views = {}
         bot.mob_battles = {}
         mob_setting_handler = MobSetting(bot)
         await setup_mob_setting(bot)
         logger.info("몹 세팅 시스템이 초기화되었습니다")
+        
+        # 스킬 시스템 상태 체크
+        await _perform_skill_system_health_check()
         
     except Exception as e:
         logger.error(f"봇 시작 중 오류 발생: {e}")
         traceback.print_exc()
 
 
+# 3. 스킬 시스템 상태 체크 함수 추가
+async def _perform_skill_system_health_check():
+    """스킬 시스템 상태 체크"""
+    try:
+        # 기본 기능 테스트
+        test_channel = "health_check"
+        test_user = "health_check_user"
+        
+        # 스킬 추가/제거 테스트
+        success = skill_manager.add_skill(
+            test_channel, "오닉셀", test_user, "테스트", test_user, "테스트", 1
+        )
+        if success:
+            skill_manager.remove_skill(test_channel, "오닉셀")
+        
+        # 주사위 처리 테스트
+        final_value, messages = await skill_effects.process_dice_roll(
+            test_user, 75, test_channel
+        )
+        
+        logger.info("✅ 스킬 시스템 상태 체크 완료")
+        
+    except Exception as e:
+        logger.error(f"스킬 시스템 상태 체크 실패: {e}")
+
+# 4. on_message 이벤트에 스킬 시스템 주사위 처리 추가
 @bot.event
 async def on_message(message):
-    """메시지 이벤트 처리"""
+    """메시지 이벤트 처리 (스킬 시스템 통합)"""
     if message.author.bot:
         # 다이스 봇 메시지 처리
         if message.author.id == 218010938807287808:  # 다이스 봇 ID
-            channel_id = message.channel.id
+            channel_id = str(message.channel.id)
             
             # 주사위 메시지 파싱
-            dice_pattern = r"`([^`]+)`님이.*?주사위를\s*굴\s*려.*?\*\*(\d+)\*\*.*?나왔습니다"
+            dice_pattern = r"`([^`]+)`님이.*?주사위를\s*굴\s*려.*?\*\*(\d+)\*\*"
             match = re.search(dice_pattern, message.content)
             
             if match:
-                player_name = match.group(1).strip()
+                user_name = match.group(1)
                 dice_value = int(match.group(2))
-
-                # 몹 전투 다이스 처리
-                if hasattr(bot, 'mob_battles') and channel_id in bot.mob_battles:
+                
+                try:
+                    # 스킬 시스템 주사위 처리
+                    final_value, skill_messages = await skill_effects.process_dice_roll(
+                        user_name, dice_value, channel_id
+                    )
+                    
+                    # 스킬 효과 메시지 전송
+                    if skill_messages:
+                        for skill_message in skill_messages:
+                            await message.channel.send(skill_message)
+                    
+                    # 값이 변경된 경우 알림
+                    if final_value != dice_value:
+                        value_change_msg = f"🎲 **{user_name}**님의 주사위 결과: {dice_value} → **{final_value}**"
+                        await message.channel.send(value_change_msg)
+                
+                except Exception as e:
+                    logger.error(f"스킬 주사위 처리 오류: {e}")
+            
+            # 기존 몹 세팅 시스템 주사위 처리도 유지
+            if hasattr(bot, 'mob_battles') and channel_id in bot.mob_battles:
                     from mob_setting import MobSetting
                     mob_setting = MobSetting(bot)
                     await mob_setting.process_mob_dice_message(message)
@@ -580,7 +655,96 @@ async def on_message(message):
     
     asyncio.create_task(handle_message_safe(message))
 
-
+def create_skill_config_files():
+    """스킬 시스템 설정 파일 생성"""
+    import json
+    from pathlib import Path
+    
+    skills_dir = Path("skills")
+    config_dir = skills_dir / "config"
+    data_dir = skills_dir / "data"
+    heroes_dir = skills_dir / "heroes"
+    
+    # 디렉토리 생성
+    for dir_path in [skills_dir, config_dir, data_dir, heroes_dir]:
+        dir_path.mkdir(exist_ok=True)
+    
+    # skill_config.json
+    config_data = {
+        "lucencia": {
+            "health_cost": 3,
+            "revival_health": 5
+        },
+        "priority_users": [
+            "1237738945635160104",
+            "1059908946741166120"
+        ],
+        "skill_users": {
+            "오닉셀": ["all_users", "admin", "monster"],
+            "피닉스": ["users_only"],
+            "오리븐": ["all_users", "admin", "monster"],
+            "카론": ["all_users", "admin", "monster"],
+            "스카넬": ["all_users", "admin", "monster"],
+            "루센시아": ["all_users", "admin", "monster"],
+            "비렐라": ["admin", "monster"],
+            "그림": ["admin", "monster"],
+            "닉사라": ["admin", "monster"],
+            "제룬카": ["all_users", "admin", "monster"],
+            "넥시스": ["1059908946741166120"],
+            "볼켄": ["admin", "monster"],
+            "단목": ["all_users", "admin", "monster"],
+            "콜 폴드": ["admin", "monster"],
+            "황야": ["admin", "monster"],
+            "스트라보스": ["all_users", "admin", "monster"]
+        },
+        "authorized_admins": [
+            "1007172975222603798",
+            "1090546247770832910"
+        ],
+        "authorized_nickname": "system | 시스템",
+        "system_settings": {
+            "auto_save_interval": 30,
+            "max_skill_duration": 10,
+            "enable_skill_logs": True,
+            "performance_mode": True
+        }
+    }
+    
+    with open(config_dir / "skill_config.json", 'w', encoding='utf-8') as f:
+        json.dump(config_data, f, ensure_ascii=False, indent=2)
+    
+    # user_skills.json (예시)
+    user_skills_data = {
+        "example_user_1": {
+            "allowed_skills": ["오닉셀", "피닉스", "오리븐"],
+            "display_name": "일반유저1",
+            "skill_level": "basic"
+        },
+        "1237738745635160104": {
+            "allowed_skills": ["피닉스", "루센시아", "오리븐", "카론"],
+            "display_name": "특별유저1",
+            "skill_level": "advanced"
+        },
+        "1059908946741166120": {
+            "allowed_skills": ["넥시스", "피닉스", "오닉셀", "스트라보스"],
+            "display_name": "특별유저2",
+            "skill_level": "master"
+        }
+    }
+    
+    with open(config_dir / "user_skills.json", 'w', encoding='utf-8') as f:
+        json.dump(user_skills_data, f, ensure_ascii=False, indent=2)
+    
+    # 빈 skill_states.json
+    with open(data_dir / "skill_states.json", 'w', encoding='utf-8') as f:
+        json.dump({}, f)
+    
+    # __init__.py 파일 생성
+    with open(heroes_dir / "__init__.py", 'w', encoding='utf-8') as f:
+        f.write('# 스킬 핸들러 모듈\n')
+    
+    print("✅ 스킬 시스템 설정 파일들이 생성되었습니다!")
+    
 # 회복 명령어에서 몹 전투 회복 처리를 위한 함수
 async def handle_mob_recovery(player_name: str, dice_value: int):
     """몹 전투에서 플레이어 회복 처리"""
@@ -879,8 +1043,13 @@ async def handle_reaction_safe(payload):
 
 @bot.event
 async def on_disconnect():
-    """연결 끊김 이벤트"""
-    logger.warning("봇 연결이 끊어졌습니다.")
+    """연결 끊김 시 스킬 시스템 정리"""
+    logger.warning("봇 연결이 끊어졌습니다. 스킬 데이터 저장 중...")
+    try:
+        await skill_manager.force_save()
+        await skill_effects.clear_cache()
+    except Exception as e:
+        logger.error(f"스킬 데이터 저장 오류: {e}")
 
 @bot.event
 async def on_resumed():
@@ -2123,13 +2292,19 @@ async def main():
         await bot_manager.shutdown()
 
 if __name__ == "__main__":
+    # 스킬 시스템 설정 파일 생성 (최초 1회)
     try:
-        if sys.platform == 'win32':
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-        
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("프로그램이 사용자에 의해 종료되었습니다.")
+        create_skill_config_files()
     except Exception as e:
-        logger.error(f"프로그램 실행 중 치명적 오류: {e}")
+        logger.error(f"스킬 설정 파일 생성 오류: {e}")
+    
+    # 기존 봇 실행 코드
+    try:
+        bot.run(BOT_TOKEN)
+    except KeyboardInterrupt:
+        logger.info("키보드 인터럽트로 봇 종료")
+    except Exception as e:
+        logger.error(f"봇 실행 중 오류: {e}")
         traceback.print_exc()
+    finally:
+        asyncio.run(shutdown_bot())
