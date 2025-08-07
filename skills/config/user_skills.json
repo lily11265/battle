@@ -1,0 +1,22 @@
+{
+  "1237738945635160104": {
+    "allowed_skills": ["피닉스", "오리븐", "카론"],
+    "display_name": "특별유저1",
+    "skill_level": "advanced"
+  },
+  "1059908946741166120": {
+    "allowed_skills": ["넥시스", "피닉스", "오닉셀"],
+    "display_name": "특별유저2", 
+    "skill_level": "master"
+  },
+  "example_user_1": {
+    "allowed_skills": ["오닉셀", "오리븐"],
+    "display_name": "일반유저1",
+    "skill_level": "basic"
+  },
+  "example_user_2": {
+    "allowed_skills": ["피닉스", "카론"],
+    "display_name": "일반유저2",
+    "skill_level": "intermediate"
+  }
+}
