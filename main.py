@@ -20,6 +20,7 @@ from mob_setting import MobSetting
 from mob_setting import AutoBattle, MobSettingView
 from mob_setting import *
 from mob_ai import create_mob_ai, AutonomousAIController, AIPersonality
+from pathlib import Path
 
 # === 스킬 시스템 import 추가 ===
 from skills.skill_manager import skill_manager
@@ -600,57 +601,61 @@ async def on_ready():
     bot_manager.reconnect_attempts = 0
     
     try:
-        synced = await bot.tree.sync()
-        logger.info(f"{len(synced)}개의 명령어가 동기화되었습니다")
-        
+        # Bot Manager 초기화
         await bot_manager.initialize()
+        logger.info("✅ Bot Manager가 초기화되었습니다")
         
-        # === 스킬 시스템 초기화 추가 ===
+        # === 스킬 시스템 초기화 ===
         await skill_manager.initialize()
         logger.info("✅ 스킬 매니저가 초기화되었습니다")
         
-        # 스킬 Cog 로딩 후 명령어 동기화
+        # 스킬 Cog 로딩
         try:
             if "SkillCog" not in bot.cogs:
                 await bot.load_extension("skills.skill")
                 logger.info("✅ 스킬 명령어 Cog가 로드되었습니다")
             
-            # Cog의 명령어를 bot.tree에 추가
+            # Cog의 명령어를 bot.tree에 추가 (중복 체크)
             skill_cog = bot.get_cog("SkillCog")
             if skill_cog:
                 for command in skill_cog.__cog_app_commands__:
-                    bot.tree.add_command(command)
-                    logger.info(f"명령어 추가됨: /{command.name}")
+                    # 이미 등록된 명령어인지 확인
+                    existing_command = bot.tree.get_command(command.name)
+                    if not existing_command:
+                        bot.tree.add_command(command)
+                        logger.info(f"명령어 추가됨: /{command.name}")
+                    else:
+                        logger.warning(f"명령어 이미 존재: /{command.name}")
+                        
         except Exception as e:
             logger.error(f"스킬 Cog 처리 실패: {e}")
             
-            # 모든 채널의 스킬 상태 초기화
-            if hasattr(skill_manager, '_skill_states'):
-                skill_manager._skill_states.clear()
-                logger.info("봇 시작: 모든 채널의 스킬 상태가 초기화되었습니다.")
-            
-            # 스킬 상태 파일 삭제 (선택사항)
-            skill_states_file = Path("skills/data/skill_states.json")
-            if skill_states_file.exists():
-                skill_states_file.unlink()
-                logger.info("봇 시작: 이전 스킬 상태 파일이 삭제되었습니다.")
-                
-        except Exception as e:
-            logger.error(f"스킬 시스템 초기화 실패: {e}")
+        # 모든 채널의 스킬 상태 초기화
+        if hasattr(skill_manager, '_skill_states'):
+            skill_manager._skill_states.clear()
+            logger.info("봇 시작: 모든 채널의 스킬 상태가 초기화되었습니다.")
         
-        # 명령어 동기화
+        # 스킬 상태 파일 삭제 (선택사항)
+        skill_states_file = Path("skills/data/skill_states.json")
+        if skill_states_file.exists():
+            skill_states_file.unlink()
+            logger.info("봇 시작: 이전 스킬 상태 파일이 삭제되었습니다.")
+        
+        # === 명령어 동기화 (한 번만 실행) ===
         synced = await bot.tree.sync()
-        logger.info(f"{len(synced)}개의 명령어가 동기화되었습니다")
+        logger.info(f"✅ {len(synced)}개의 명령어가 동기화되었습니다")
         
-        # 몹 세팅 초기화
+        # === 몹 세팅 초기화 ===
         global mob_setting_handler
         bot.mob_battles = {}
         mob_setting_handler = MobSetting(bot)
         await setup_mob_setting(bot)
-        logger.info("몹 세팅 시스템이 초기화되었습니다")
+        logger.info("✅ 몹 세팅 시스템이 초기화되었습니다")
         
-        # 스킬 시스템 상태 체크
-        await _perform_skill_system_health_check()
+        # 스킬 시스템 상태 체크 (함수가 정의되어 있는 경우)
+        if 'perform_skill_system_health_check' in globals():
+            await perform_skill_system_health_check()
+            logger.info("✅ 스킬 시스템 상태 체크 완료")
         
     except Exception as e:
         logger.error(f"봇 시작 중 오류 발생: {e}")
