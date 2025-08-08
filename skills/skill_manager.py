@@ -504,8 +504,8 @@ class SkillManager:
                 
                 logger.info(f"채널 {channel_id}의 전투 종료 - 스킬 상태 초기화 (메모리만)")
             
-    except Exception as e:
-        logger.error(f"전투 종료 처리 실패: {e}")
+        except Exception as e:
+            logger.error(f"전투 종료 처리 실패: {e}")
     
     # === 기본 설정 생성 ===
     
@@ -578,5 +578,6 @@ class SkillManager:
 
 # 싱글톤 인스턴스
 skill_manager = SkillManager()
+
 
 
