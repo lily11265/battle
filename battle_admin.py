@@ -1004,7 +1004,7 @@ class AdminBattleManager:
             
         except Exception as e:
             logger.error(f"데미지 후 스킬 처리 실패: {e}")
-
+            
     async def _process_init_results(self, channel_id: int):
         """선공 결정 결과 처리"""
         battle = self.active_battles.get(channel_id)
@@ -1014,36 +1014,57 @@ class AdminBattleManager:
         # 로깅 추가로 디버깅
         logger.info(f"선공 결정 처리 시작 - 채널: {channel_id}")
         
-        # 결과 정렬
+        # 결과 정렬 - (user_id, dice_value) 형태로 정리
         results = []
+        
+        # 유저들의 주사위 결과 추가
         for user in battle.users:
             dice_value = battle.pending_dice["results"].get(user.user.id, 0)
-            results.append((user, dice_value))
+            results.append((user.user.id, dice_value, user))
         
-        # Admin도 추가
+        # Admin의 주사위 결과 추가
         admin_dice = battle.pending_dice["results"].get(battle.admin.user.id, 0)
-        results.append((battle.admin, admin_dice))
+        results.append((battle.admin.user.id, admin_dice, battle.admin))
         
-        # 주사위 값으로 정렬
+        # 주사위 값으로 정렬 (내림차순)
         results.sort(key=lambda x: x[1], reverse=True)
         
         # 선공 결정
-        if results[0][1] > results[1][1]:
+        winner_user_id = results[0][0]
+        winner_dice = results[0][1]
+        second_dice = results[1][1] if len(results) > 1 else 0
+        
+        if winner_dice > second_dice:
             # 명확한 선공
-            if isinstance(results[0][0], AdminPlayer):
+            if winner_user_id == battle.admin.user.id:
+                # Admin이 선공
+                battle.turn_phase = TurnPhase.ADMIN_ATTACK
                 battle.is_admin_turn = True
                 await battle.message.channel.send(f"⚔️ {battle.monster_name}이(가) 선공을 가져갑니다!")
+                logger.info(f"Admin({battle.admin.real_name})이 선공")
             else:
+                # User가 선공
+                battle.turn_phase = TurnPhase.USER_ATTACK
                 battle.is_admin_turn = False
-                await battle.message.channel.send(f"⚔️ 플레이어들이 선공을 가져갑니다!")
+                
+                # 선공한 유저의 인덱스 찾기
+                for idx, player in enumerate(battle.users):
+                    if player.user.id == winner_user_id:
+                        battle.current_turn_index = idx
+                        await battle.message.channel.send(f"⚔️ {player.real_name}이(가) 선공을 가져갑니다!")
+                        logger.info(f"User({player.real_name})가 선공")
+                        break
         else:
             # 동점 - 플레이어 우선
+            battle.turn_phase = TurnPhase.USER_ATTACK
             battle.is_admin_turn = False
+            battle.current_turn_index = 0  # 첫 번째 유저부터 시작
             await battle.message.channel.send("🎲 동점! 플레이어들이 선공을 가져갑니다!")
+            logger.info("동점으로 플레이어가 선공")
         
         # 전투 상태 초기화
         battle.pending_dice = None
-        battle.turn_phase = TurnPhase.WAITING
+        battle.phase = BattlePhase.IN_BATTLE  # 전투 단계로 변경
         
         # 첫 번째 턴 시작
         await asyncio.sleep(1)
