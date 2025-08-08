@@ -1064,7 +1064,7 @@ class AdminBattleManager:
         
         # 전투 상태 초기화
         battle.pending_dice = None
-        battle.phase = BattlePhase.IN_BATTLE  # 전투 단계로 변경
+        battle.phase = BattlePhase.COMBAT  # 전투 단계로 변경
         
         # 첫 번째 턴 시작
         await asyncio.sleep(1)
