@@ -1003,53 +1003,54 @@ class AdminBattleManager:
             logger.error(f"데미지 후 스킬 처리 실패: {e}")
 
     async def _process_init_results(self, channel_id: int):
-        """
-        선공 결정 결과 처리
-        """
-        battle = self.active_battles[channel_id]
-        results = battle.pending_dice["results"]
+        """선공 결정 결과 처리"""
+        battle = self.active_battles.get(channel_id)
+        if not battle:
+            return
         
-        # 각 플레이어의 초기 다이스 저장
-        if battle.admin:
-            battle.admin.init_roll = results.get(battle.admin.user.id, 0)
+        # 로깅 추가로 디버깅
+        logger.info(f"선공 결정 처리 시작 - 채널: {channel_id}")
         
-        for player in battle.users:
-            player.init_roll = results.get(player.user.id, 0)
+        # 결과 정렬
+        results = []
+        for user in battle.users:
+            dice_value = battle.pending_dice["results"].get(user.user.id, 0)
+            results.append((user, dice_value))
         
-        # 유저들을 다이스 값 기준으로 정렬 (높은 순)
-        sorted_users = sorted(battle.users, key=lambda p: p.init_roll, reverse=True)
-        battle.users = sorted_users
+        # Admin도 추가
+        admin_dice = battle.pending_dice["results"].get(battle.admin.user.id, 0)
+        results.append((battle.admin, admin_dice))
         
-        # 결과 메시지 생성
-        init_results = []
-        if battle.admin:
-            init_results.append(f"{battle.monster_name}: {battle.admin.init_roll}")
-        for player in battle.users:
-            init_results.append(f"{player.real_name}: {player.init_roll}")
+        # 주사위 값으로 정렬
+        results.sort(key=lambda x: x[1], reverse=True)
         
-        embed = discord.Embed(
-            title=f"🎲 선공 결정 완료",
-            description=f"**결과:**\n" + "\n".join(init_results) + "\n\n"
-                    f"**턴 순서:** {' → '.join([p.real_name for p in battle.users])}",
-            color=discord.Color.green()
-        )
+        # 선공 결정
+        if results[0][1] > results[1][1]:
+            # 명확한 선공
+            if isinstance(results[0][0], AdminPlayer):
+                battle.is_admin_turn = True
+                await battle.message.channel.send(f"⚔️ {battle.monster_name}이(가) 선공을 가져갑니다!")
+            else:
+                battle.is_admin_turn = False
+                await battle.message.channel.send(f"⚔️ 플레이어들이 선공을 가져갑니다!")
+        else:
+            # 동점 - 플레이어 우선
+            battle.is_admin_turn = False
+            await battle.message.channel.send("🎲 동점! 플레이어들이 선공을 가져갑니다!")
         
-        if battle.admin:
-            embed.description += f" → {battle.monster_name}"
-        
-        await battle.message.channel.send(embed=embed)
-        
-        # 전투 단계로 전환
-        battle.phase = BattlePhase.COMBAT
+        # 전투 상태 초기화
         battle.pending_dice = None
-        battle.current_round = 1
+        battle.turn_phase = TurnPhase.WAITING
         
-        # 스킬 시스템에 전투 시작 알림
-        if SKILL_SYSTEM_AVAILABLE and skill_manager:
-            skill_manager.start_battle(str(channel_id))
+        # 첫 번째 턴 시작
+        await asyncio.sleep(1)
         
-        await asyncio.sleep(2)
-        await self._start_next_turn(channel_id)
+        if battle.is_admin_turn:
+            # Admin 턴
+            await self._process_admin_turn(channel_id)
+        else:
+            # 플레이어 턴
+            await self._start_player_attack_phase(channel_id)
 
     async def accept_battle_with_sync(self, interaction: discord.Interaction, 
                                     channel_id: int, sync: bool):
@@ -2067,9 +2068,15 @@ class AdminBattleManager:
         battle.phase = BattlePhase.FINISHED
         battle.is_active = False
         
-        # 스킬 시스템에 전투 종료 알림
+        # 스킬 시스템에 전투 종료 알림 (안전하게 처리)
         if SKILL_SYSTEM_AVAILABLE and skill_manager:
-            skill_manager.end_battle(str(channel_id))
+            try:
+                if hasattr(skill_manager, 'end_battle'):
+                    skill_manager.end_battle(str(channel_id))
+                else:
+                    skill_manager.clear_channel_skills(str(channel_id))
+            except Exception as e:
+                logger.error(f"스킬 시스템 정리 중 오류: {e}")
         
         # 승자 결정
         admin_health = battle.admin.max_health - battle.admin.hits_received
@@ -2140,6 +2147,7 @@ class AdminBattleManager:
         
         # 전투 정보 제거
         del self.active_battles[channel_id]
+        logger.info(f"전투 종료 - 채널: {channel_id}")
     
     async def _end_team_battle(self, channel_id: int):
         """팀 전투 종료 처리"""
