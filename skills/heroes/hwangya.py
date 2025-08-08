@@ -25,16 +25,16 @@ class HwangyaHandler(BaseSkillHandler):
         is_monster = await self._is_monster_or_admin(interaction.user)
         
         if is_monster:
-            title = "⚡ 황야의 광란!"
-            description = f"**{interaction.user.display_name}**이 황야의 광전사 모드에 돌입합니다!\n\n" \
+            title = "황야 주변 시간이 느리게 흘러갑니다"
+            description = f"**{interaction.user.display_name}**이 황야의 능력을 카피해옵니다.\n\n" \
                          f"💥 **이중 행동**: 매 턴마다 2번의 공격이 가능합니다\n" \
                          f"🎲 **두 번 굴림**: 공격할 때마다 2개의 주사위를 굴립니다\n" \
                          f"⏱️ **지속시간**: {duration}라운드"
             color = discord.Color.red()
             effect_desc = "• **공격 횟수**: 턴당 2회\n• **주사위**: 각 공격마다 별도 굴림\n• **행동 선택**: 공격+공격만 가능"
         else:
-            title = "🌟 황야의 각성!"
-            description = f"**{interaction.user.display_name}**이 황야의 다재다능함을 발휘합니다!\n\n" \
+            title = "🌟 황야의 도움"
+            description = f"**{interaction.user.display_name}**이 황야에게 도움을 받습니다.\n\n" \
                          f"⚡ **이중 행동**: 매 턴마다 2가지 행동이 가능합니다\n" \
                          f"🔄 **행동 조합**: 공격+공격, 공격+회복, 회복+회복\n" \
                          f"⏱️ **지속시간**: {duration}라운드"
@@ -76,21 +76,34 @@ class HwangyaHandler(BaseSkillHandler):
             interaction.user.display_name, duration
         )
         
-        # 특별 효과 저장 (이중 행동 카운터)
+        # 스킬 상태 저장
+        from ..skill_manager import skill_manager
+        from ..skill_effects import skill_effects
+        channel_id = str(interaction.channel.id)
+        
+        success = skill_manager.add_skill(
+            channel_id, "황야", str(interaction.user.id),
+            interaction.user.display_name, str(interaction.user.id),
+            interaction.user.display_name, duration
+        )
+        
+        # 특별 효과 저장을 skill_effects를 통해 처리 (테스트와 일관성 유지)
         if success:
-            channel_state = skill_manager.get_channel_state(channel_id)
-            if "special_effects" not in channel_state:
-                channel_state["special_effects"] = {}
+            await skill_effects.process_skill_activation(
+                channel_id, "황야", str(interaction.user.id), 
+                str(interaction.user.id), duration
+            )
             
-            channel_state["special_effects"]["hwangya_double_action"] = {
-                "user_id": str(interaction.user.id),
-                "user_name": interaction.user.display_name,
-                "is_monster": is_monster,
-                "actions_used_this_turn": 0,
-                "max_actions_per_turn": 2,
-                "duration": duration
-            }
-            skill_manager.mark_dirty(channel_id)
+            # 추가로 황야 특유의 정보 저장
+            channel_state = skill_manager.get_channel_state(channel_id)
+            if "hwangya_double_action" in channel_state.get("special_effects", {}):
+                channel_state["special_effects"]["hwangya_double_action"].update({
+                    "user_name": interaction.user.display_name,
+                    "is_monster": is_monster,
+                    "max_actions_per_turn": 2,
+                    "duration": duration
+                })
+                skill_manager.mark_dirty(channel_id)
     
     async def can_use_recovery(self, channel_id: str, user_id: str) -> bool:
         """회복 사용 가능 여부 확인 (유저용)"""
