@@ -138,20 +138,23 @@ class SkillManager:
                 self._user_skills = {}
     
     async def _load_skill_states(self):
-        """스킬 상태 로드"""
+        """스킬 상태 로드 - 봇 재시작시 초기화"""
         states_file = self.data_dir / "skill_states.json"
         
-        if not states_file.exists():
-            self._skill_states = {}
-            await self._save_skill_states()
-        else:
+        # 봇이 재시작될 때마다 스킬 상태를 초기화
+        self._skill_states = {}
+        logger.info("봇 재시작으로 인해 모든 스킬 상태가 초기화되었습니다.")
+        
+        # 파일이 존재하면 삭제 (선택사항)
+        if states_file.exists():
             try:
-                async with aiofiles.open(states_file, 'r', encoding='utf-8') as f:
-                    content = await f.read()
-                    self._skill_states = json.loads(content) if content else {}
+                states_file.unlink()
+                logger.info("이전 스킬 상태 파일이 삭제되었습니다.")
             except Exception as e:
-                logger.error(f"스킬 상태 파일 로드 실패: {e}")
-                self._skill_states = {}
+                logger.error(f"스킬 상태 파일 삭제 실패: {e}")
+        
+        # 빈 상태로 새 파일 생성
+        await self._save_skill_states()
     
     # === 스킬 상태 관리 메서드들 ===
     
@@ -435,7 +438,7 @@ class SkillManager:
                 await asyncio.sleep(self._save_interval)
                 
                 if self._dirty_channels:
-                    await self._save_skill_states()
+                    #await self._save_skill_states()
                     self._dirty_channels.clear()
                     logger.debug(f"자동 저장 완료 - {datetime.now()}")
                     
@@ -473,11 +476,36 @@ class SkillManager:
             self._db_conn.commit()
         except Exception as e:
             logger.error(f"스킬 로그 저장 실패: {e}")
-
+    
     def end_battle(self, channel_id: str):
-        """전투 종료 시 스킬 정리 (clear_channel_skills의 별칭)"""
-        self.clear_channel_skills(channel_id)
-        logger.info(f"전투 종료로 인한 스킬 정리 - 채널: {channel_id}")
+        """전투 종료 - 메모리에서만 삭제"""
+        try:
+            with self._lock:
+                channel_id = str(channel_id)
+                channel_state = self.get_channel_state(channel_id)
+                
+                if not channel_state["battle_active"]:
+                    logger.warning(f"채널 {channel_id}에 활성 전투가 없습니다.")
+                    return
+                
+                # 전투 종료 처리
+                channel_state["battle_active"] = False
+                channel_state["current_round"] = 1
+                channel_state["active_skills"].clear()
+                channel_state["disabled_skills"].clear()
+                channel_state["special_effects"].clear()
+                
+                # 파일에 저장하지 않고 메모리에서만 제거
+                if channel_id in self._skill_states:
+                    del self._skill_states[channel_id]
+                
+                self._log_skill_action(channel_id, "ALL", "SYSTEM", "end_battle", 
+                                     "Battle ended - skills cleared from memory only")
+                
+                logger.info(f"채널 {channel_id}의 전투 종료 - 스킬 상태 초기화 (메모리만)")
+            
+    except Exception as e:
+        logger.error(f"전투 종료 처리 실패: {e}")
     
     # === 기본 설정 생성 ===
     
@@ -550,4 +578,5 @@ class SkillManager:
 
 # 싱글톤 인스턴스
 skill_manager = SkillManager()
+
 
