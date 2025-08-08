@@ -515,11 +515,7 @@ class ConfirmationView(discord.ui.View):
 
 async def setup(bot):
     """Cog 등록"""
-    cog = SkillCog(bot)
-    await bot.add_cog(cog)
-    
-    # Cog 명령어를 bot.tree에 수동 추가
-    for command in cog.__cog_app_commands__:
-        bot.tree.add_command(command)
+    await bot.add_cog(SkillCog(bot))
+
 
 
