@@ -1076,6 +1076,15 @@ class AdminBattleManager:
             # 플레이어 턴
             await self._start_next_turn(channel_id)
 
+    async def _process_admin_turn(self, channel_id: int):
+        """Admin 턴 처리"""
+        battle = self.active_battles.get(channel_id)
+        if not battle:
+            return
+        
+        # Admin의 공격 턴 시작
+        await self._start_battle_turn(channel_id)
+    
     async def accept_battle_with_sync(self, interaction: discord.Interaction, 
                                     channel_id: int, sync: bool):
         """전투 수락 (체력 동기화 옵션 포함)"""
