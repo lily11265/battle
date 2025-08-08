@@ -473,6 +473,11 @@ class SkillManager:
             self._db_conn.commit()
         except Exception as e:
             logger.error(f"스킬 로그 저장 실패: {e}")
+
+    def end_battle(self, channel_id: str):
+        """전투 종료 시 스킬 정리 (clear_channel_skills의 별칭)"""
+        self.clear_channel_skills(channel_id)
+        logger.info(f"전투 종료로 인한 스킬 정리 - 채널: {channel_id}")
     
     # === 기본 설정 생성 ===
     
@@ -545,3 +550,4 @@ class SkillManager:
 
 # 싱글톤 인스턴스
 skill_manager = SkillManager()
+
