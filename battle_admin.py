@@ -1074,7 +1074,7 @@ class AdminBattleManager:
             await self._process_admin_turn(channel_id)
         else:
             # 플레이어 턴
-            await self._start_player_attack_phase(channel_id)
+            await self._start_next_turn(channel_id)
 
     async def accept_battle_with_sync(self, interaction: discord.Interaction, 
                                     channel_id: int, sync: bool):
