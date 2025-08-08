@@ -513,8 +513,13 @@ class ConfirmationView(discord.ui.View):
         await interaction.response.send_message("❌ 스킬 사용을 취소했습니다.", ephemeral=True)
         self.stop()
 
-# Cog 등록 함수
 async def setup(bot):
     """Cog 등록"""
-    await bot.add_cog(SkillCog(bot))
+    cog = SkillCog(bot)
+    await bot.add_cog(cog)
+    
+    # Cog 명령어를 bot.tree에 수동 추가
+    for command in cog.__cog_app_commands__:
+        bot.tree.add_command(command)
+
 
