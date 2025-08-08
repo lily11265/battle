@@ -34,8 +34,8 @@ class DanmokHandler(BaseSkillHandler):
     async def _activate_monster_danmok(self, interaction, duration):
         """몬스터 단목 활성화 (관통 시스템)"""
         embed = discord.Embed(
-            title="🏹 단목의 관통 화살!",
-            description=f"**{interaction.user.display_name}**이 단목의 관통 화살을 준비합니다!\n\n"
+            title="🏹 단목의 바람 화살",
+            description=f"**{interaction.user.display_name}**이 사슴신의 힘을 빼앗아 옵니다.\n\n"
                        f"🎯 **관통 시스템**: 모든 유저가 주사위를 굴립니다\n"
                        f"💥 **직접 피격**: 50 미만시 -20 피해\n"
                        f"🔄 **관통 피격**: 다음 순서 유저 -10 피해\n"
@@ -65,6 +65,7 @@ class DanmokHandler(BaseSkillHandler):
         
         # 단목 대기 상태 설정
         from ..skill_manager import skill_manager
+        from ..skill_effects import skill_effects
         channel_id = str(interaction.channel.id)
         
         success = skill_manager.add_skill(
@@ -72,18 +73,24 @@ class DanmokHandler(BaseSkillHandler):
             interaction.user.display_name, "all_users", "모든 유저", duration
         )
         
-        channel_state = skill_manager.get_channel_state(channel_id)
-        if "special_effects" not in channel_state:
-            channel_state["special_effects"] = {}
-        
-        channel_state["special_effects"]["danmok_penetration"] = {
-            "caster_id": str(interaction.user.id),
-            "caster_name": interaction.user.display_name,
-            "dice_results": {},
-            "turn_order": [],
-            "duration": duration
-        }
-        skill_manager.mark_dirty(channel_id)
+        if success:
+            # skill_effects를 통해 특수 효과 설정 (테스트와 일관성 유지)
+            await skill_effects.process_skill_activation(
+                channel_id, "단목", str(interaction.user.id), 
+                "all_users", duration
+            )
+            
+            # 추가로 단목 특유의 정보 저장
+            channel_state = skill_manager.get_channel_state(channel_id)
+            if "danmok_penetration" in channel_state.get("special_effects", {}):
+                channel_state["special_effects"]["danmok_penetration"].update({
+                    "caster_id": str(interaction.user.id),
+                    "caster_name": interaction.user.display_name,
+                    "dice_results": {},
+                    "turn_order": [],
+                    "duration": duration
+                })
+                skill_manager.mark_dirty(channel_id)
     
     async def _activate_user_danmok(self, interaction, duration):
         """유저 단목 활성화 (직접 공격)"""
@@ -110,7 +117,7 @@ class DanmokHandler(BaseSkillHandler):
                 
                 await send_battle_message(
                     channel_id,
-                    f"🏹 **단목의 관통 화살!**\n"
+                    f"🏹 **사슴신의 바람 화살이 손에 쥐어집니다.**\n"
                     f"🎯 {target_name}에게 방어 무시 공격!\n"
                     f"💥 확정 피해: -30 HP"
                 )
