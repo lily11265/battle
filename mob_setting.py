@@ -10,7 +10,7 @@ from datetime import datetime
 import re
 from dice_system import dice_system  # 기존 주사위 시스템
 from battle_utils import extract_health_from_nickname, update_nickname_health, extract_real_name
-from mob_ai import MobAI, AIPersonality, create_mob_ai, AutonomousAIController, ActionType, CombatAction
+from mob_ai import MobAI, AIPersonality, create_mob_ai, AutonomousAIController, ActionType, CombatAction, DifficultyManager
 
 
 logger = logging.getLogger(__name__)
@@ -725,6 +725,119 @@ class MobSettingView(discord.ui.View):
         
         # 선공 결정
         await self.determine_initiative()
+
+    async def _sync_player_recovery_from_nickname(self, battle: AutoBattle, player_name: str) -> bool:
+        """닉네임에서 체력을 읽어 회복이 있었는지 확인하고 전투에 반영"""
+        logger.info(f"[DEBUG] Syncing recovery for player: {player_name}")
+        
+        # 해당 플레이어 찾기
+        target_player = None
+        for player in battle.players:
+            if player.real_name == player_name:
+                target_player = player
+                break
+        
+        if not target_player:
+            logger.warning(f"[DEBUG] Player {player_name} not found")
+            return False
+        
+        try:
+            # ✅ 핵심 수정: Member 객체를 다시 fetch해서 최신 닉네임 가져오기
+            fresh_member = await battle.channel.guild.fetch_member(target_player.user.id)
+            current_nickname = fresh_member.display_name
+            logger.info(f"[DEBUG] Fresh nickname from server: {current_nickname}")
+            
+            # 기존 저장된 닉네임과 비교
+            old_nickname = target_player.user.display_name
+            if old_nickname != current_nickname:
+                logger.info(f"[DEBUG] Nickname changed: {old_nickname} -> {current_nickname}")
+            
+        except Exception as e:
+            logger.error(f"[DEBUG] Failed to fetch fresh member info: {e}")
+            # fallback to cached nickname
+            current_nickname = target_player.user.display_name
+        
+        logger.info(f"[DEBUG] Using nickname: {current_nickname}")
+        
+        try:
+            import re
+            
+            # ✅ 수정된 정규식 패턴들 - 다양한 닉네임 형태 지원
+            patterns = [
+                r'/\s*(\d+)\s*/',        # /숫자/ 또는 / 숫자 / 형태 
+                r'\|\s*(\d+)',           # | 숫자 형태 (예: 퓨어 메탈 | 100)
+                r'/\s*(\d+)(?!\s*/)',    # / 숫자 형태 (슬래시 하나, 예: 유진석 / 100)
+                r'(\d+)(?=\s*$)',        # 끝에 오는 숫자 (예: 벨사이르 드라켄리트 80)
+            ]
+            
+            nickname_current_health = None
+            
+            # 각 패턴을 순서대로 시도
+            for pattern in patterns:
+                matches = re.findall(pattern, current_nickname)
+                if matches:
+                    nickname_current_health = int(matches[-1])  # 마지막 매칭된 숫자 사용
+                    logger.info(f"[DEBUG] Health extracted using pattern '{pattern}': {nickname_current_health}")
+                    break
+            
+            if nickname_current_health is None:
+                logger.warning(f"[DEBUG] Could not extract health from nickname: {current_nickname}")
+                return False
+            
+            stored_current_health = target_player.real_current_health
+            
+            logger.info(f"[DEBUG] Health comparison - nickname: {nickname_current_health}, stored: {stored_current_health}")
+            
+            # 회복 여부 확인 (닉네임 체력 > 저장된 체력)
+            if nickname_current_health > stored_current_health:
+                recovery_amount = nickname_current_health - stored_current_health
+                logger.info(f"[DEBUG] Recovery detected! Amount: {recovery_amount}")
+                
+                # 전투 체력도 비례해서 회복 (실제체력:전투체력 = 100:10 비율)
+                battle_recovery = max(1, recovery_amount // 10)  # 최소 1 회복
+                
+                # 체력 회복 적용
+                target_player.heal(battle_recovery, recovery_amount)
+                logger.info(f"[DEBUG] Applied recovery - battle: +{battle_recovery}, real: +{recovery_amount}")
+                logger.info(f"[DEBUG] New health values - battle: {target_player.current_health}/{target_player.max_health}, real: {target_player.real_current_health}/{target_player.real_max_health}")
+                
+                # Member 객체도 업데이트
+                target_player.user = fresh_member
+                logger.info(f"[DEBUG] Updated player member object")
+                
+                # 전투 상태 업데이트 메시지
+                await battle.channel.send(
+                    f"💚 **{target_player.real_name}** 님이 회복했습니다! (+{recovery_amount} 체력)\n"
+                    f"현재 체력: {target_player.real_current_health}/{target_player.real_max_health}"
+                )
+                
+                # 메인 메시지 업데이트
+                if battle.main_message:
+                    try:
+                        embed = self.create_battle_status_embed()
+                        await battle.main_message.edit(embed=embed)
+                    except Exception as e:
+                        logger.error(f"[DEBUG] Failed to update main message: {e}")
+                
+                # 플레이어 턴이면 턴 완료 처리
+                if (battle.pending_action and 
+                    battle.pending_action.get("type") == "player_turn" and
+                    battle.pending_action.get("player") == target_player):
+                    
+                    logger.info(f"[DEBUG] Completing player turn after recovery")
+                    target_player.has_acted_this_turn = True
+                    battle.current_turn_index += 1
+                    battle.pending_action = None
+                    await self.process_turn()
+                
+                return True
+            else:
+                logger.info(f"[DEBUG] No recovery detected (health unchanged)")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[DEBUG] Error in recovery sync: {e}")
+            return False
 
     async def determine_initiative(self):
         """선공 결정"""
@@ -1815,12 +1928,338 @@ class MobSettingView(discord.ui.View):
         return color * filled + "⬜" * empty
 
 class MobSetting(commands.Cog):
-    """몹 세팅 Cog (AI 통합)"""
     def __init__(self, bot):
-        self.bot = bot  # bot 객체 저장
+        self.bot = bot
         if not hasattr(bot, 'mob_battles'):
             bot.mob_battles = {}
-    
+        # 스킬 시스템과의 연동을 위한 전투 상태 관리
+        if not hasattr(bot, 'battle_states'):
+            bot.battle_states = {}
+        self.player_health_tracking = {}
+
+    async def create_mob_battle(
+        self, 
+        interaction: discord.Interaction,
+        mob_name: str,
+        mob_health: int,
+        health_sync: bool,
+        ai_personality: str = "tactical",
+        ai_difficulty: str = "normal",
+        enable_skills: bool = True
+    ) -> bool:
+        """몹 전투 생성 + 스킬 시스템 통합"""
+        try:
+            channel_id = interaction.channel.id
+            
+            # 이미 진행 중인 전투 체크
+            if channel_id in self.bot.mob_battles:
+                await interaction.followup.send("❌ 이미 진행 중인 몹 전투가 있습니다.")
+                return False
+
+            # 실제 체력 계산
+            mob_real_health = mob_health * 10 if health_sync else 100
+
+            # 몹 AI 생성
+            from mob_ai import create_mob_ai, AIPersonality
+            personality_map = {
+                "aggressive": AIPersonality.AGGRESSIVE,
+                "defensive": AIPersonality.DEFENSIVE,
+                "tactical": AIPersonality.TACTICAL,
+                "berserker": AIPersonality.BERSERKER,
+                "opportunist": AIPersonality.OPPORTUNIST
+            }
+
+            mob_ai = create_mob_ai(
+                mob_name=mob_name,          # 첫 번째 필수 인자 추가!
+                mob_health=mob_health,      # 두 번째 필수 인자 추가!
+                personality=ai_personality, # 문자열로 전달 (자동 변환됨)
+                difficulty=ai_difficulty
+            )
+
+            # AutoBattle 객체 생성
+            battle = AutoBattle(
+                channel=interaction.channel,
+                mob_name=mob_name,
+                mob_health=mob_health,
+                mob_real_health=mob_real_health,
+                health_sync=health_sync,
+                creator=interaction.user,        # 🔧 이 줄 추가!
+                ai_personality=ai_personality,
+                ai_difficulty=ai_difficulty,
+                mob_ai=mob_ai
+                )
+
+            # View 생성
+            view = MobSettingView(battle)
+            battle.main_message = await interaction.followup.send(
+                embed=view.create_setup_embed(),
+                view=view
+            )
+
+            # 봇에 전투 등록
+            self.bot.mob_battles[channel_id] = battle
+
+            # === 스킬 시스템 활성화 ===
+            if enable_skills:
+                await self._activate_skill_system(interaction.channel.id, mob_name)
+
+            logger.info(f"몹 전투 생성 완료 - {mob_name}, 채널: {channel_id}, 스킬: {enable_skills}")
+            return True
+
+        except Exception as e:
+            logger.error(f"몹 전투 생성 실패: {e}")
+            await interaction.followup.send(f"❌ 몹 전투 생성 중 오류가 발생했습니다: {e}")
+            return False
+
+    async def _activate_skill_system(self, channel_id: int, mob_name: str):
+        """스킬 시스템 활성화"""
+        try:
+            # 스킬 매니저 임포트 및 활성화
+            from skills.skill_manager import skill_manager
+            
+            channel_id_str = str(channel_id)
+            channel_state = skill_manager.get_channel_state(channel_id_str)
+            
+            # 전투 상태 설정
+            channel_state["battle_active"] = True
+            channel_state["battle_type"] = "mob_battle"
+            channel_state["mob_name"] = mob_name
+            channel_state["admin_can_use_skills"] = True  # Admin 스킬 사용 허용
+            
+            # 상태 저장
+            await skill_manager._save_skill_states()
+            
+            logger.info(f"스킬 시스템 활성화 완료 - 채널: {channel_id_str}, 몹: {mob_name}")
+            
+            # 채널에 활성화 안내 메시지 전송
+            channel = self.bot.get_channel(channel_id)
+            if channel:
+                skill_embed = discord.Embed(
+                    title="⚔️ 스킬 시스템 활성화!",
+                    description=f"**Admin**이 `/스킬` 명령어를 사용할 수 있습니다!\n\n"
+                               f"🎯 **사용법**: `/스킬 영웅:(영웅명) 라운드:(지속시간)`\n"
+                               f"💡 **팁**: 전투 중 언제든지 영웅의 힘을 빌려보세요!",
+                    color=discord.Color.blue()
+                )
+                skill_embed.add_field(
+                    name="🔰 추천 스킬",
+                    value="• **공격형**: 연속공격, 충전공격, 관통공격\n"
+                          "• **방어형**: 보호막, 반격, 회피증가\n"
+                          "• **전략형**: 광폭화, 처형, 타겟마킹\n"
+                          "• **디버프**: 마비, 약화, 혼란",
+                    inline=False
+                )
+                await channel.send(embed=skill_embed)
+                
+        except Exception as e:
+            logger.error(f"스킬 시스템 활성화 오류 - 채널: {channel_id}: {e}")
+            
+    async def _deactivate_skill_system(self, channel_id: int) -> int:
+        """스킬 시스템 비활성화 및 정리"""
+        try:
+            from skills.skill_manager import skill_manager
+            
+            channel_id_str = str(channel_id)
+            channel_state = skill_manager.get_channel_state(channel_id_str)
+            
+            # 활성 스킬 개수 확인
+            active_skills_count = len(channel_state["active_skills"])
+            
+            # 전투 상태 해제
+            channel_state["battle_active"] = False
+            channel_state["battle_type"] = None
+            channel_state["mob_name"] = None
+            channel_state["admin_can_use_skills"] = False
+            
+            # 활성 스킬 정리
+            channel_state["active_skills"].clear()
+            channel_state["special_effects"].clear()
+            
+            # 상태 저장
+            await skill_manager._save_skill_states()
+            
+            logger.info(f"스킬 시스템 정리 완료 - 채널: {channel_id_str}, 정리된 스킬: {active_skills_count}개")
+            return active_skills_count
+            
+        except Exception as e:
+            logger.error(f"스킬 시스템 정리 오류 - 채널: {channel_id}: {e}")
+            return 0
+
+    async def handle_mob_surrender(self, channel_id: int, user_id: int) -> bool:
+        """몹 전투 항복 처리"""
+        if channel_id not in self.bot.mob_battles:
+            return False
+        
+        battle = self.bot.mob_battles[channel_id]
+        
+        # Admin이 항복하는 경우 (몹이 항복)
+        if user_id in [1007172975222603798, 1090546247770832910]:  # Admin ID들
+            await battle.channel.send(f"🏳️ **{battle.mob_name}이(가) 항복했습니다!")
+            
+            # 전투 종료 처리
+            await self._end_battle(battle)
+            return True
+        
+        # 플레이어가 항복하는 경우
+        for player in battle.players:
+            if user_id == player.user.id and not player.is_eliminated:
+                player.is_eliminated = True
+                
+                await battle.channel.send(f"🏳️ {player.real_name}이(가) 항복했습니다!")
+                
+                # 전투 종료 체크
+                await self._check_battle_end(battle)
+                return True
+        
+        return False
+
+    async def _end_battle(self, battle):
+        """전투 종료 처리"""
+        try:
+            # 스킬 시스템 정리
+            cleaned_skills = await self._deactivate_skill_system(battle.channel.id)
+            
+            # 메인 메시지 정리
+            if battle.main_message:
+                await battle.main_message.edit(
+                    embed=discord.Embed(
+                        title="전투 종료",
+                        description=f"{battle.mob_name} 전투가 종료되었습니다!",
+                        color=discord.Color.green()
+                    ),
+                    view=None
+                )
+            
+            # 전투 제거
+            self.bot.mob_battles.pop(battle.channel.id, None)
+            
+            # 스킬 정리 안내
+            if cleaned_skills > 0:
+                cleanup_embed = discord.Embed(
+                    title="🧹 전투 정리 완료",
+                    description=f"활성화된 스킬 {cleaned_skills}개가 정리되었습니다.",
+                    color=discord.Color.blue()
+                )
+                await battle.channel.send(embed=cleanup_embed)
+            
+            logger.info(f"전투 종료 처리 완료 - 채널: {battle.channel.id}, 몹: {battle.mob_name}")
+            
+        except Exception as e:
+            logger.error(f"전투 종료 처리 오류: {e}")
+
+    async def _check_battle_end(self, battle):
+        """전투 종료 조건 체크"""
+        try:
+            # 플레이어 전멸 체크
+            active_players = [p for p in battle.players if not p.is_eliminated]
+            if not active_players:
+                # 몹 승리
+                await battle.channel.send(f"💀 **{battle.mob_name}의 승리!**\n모든 플레이어가 전투불능이 되었습니다!")
+                await self._end_battle(battle)
+                return
+            
+            # 몹 체력 0 체크
+            if battle.mob_current_health <= 0:
+                # 플레이어 승리
+                winner_names = [p.real_name for p in active_players]
+                await battle.channel.send(f"🎉 **플레이어 승리!**\n생존자: {', '.join(winner_names)}")
+                await self._end_battle(battle)
+                return
+                
+        except Exception as e:
+            logger.error(f"전투 종료 체크 오류: {e}")
+
+    async def process_mob_dice_message(self, message: discord.Message):
+        """몹 전투에서 주사위 메시지 처리"""
+        try:
+            channel_id = message.channel.id
+            if channel_id not in self.bot.mob_battles:
+                return
+                
+            battle = self.bot.mob_battles[channel_id]
+            if not battle.is_active:
+                return
+                
+            # 주사위 결과 파싱
+            dice_result = self.parse_dice_message(message.content)
+            if not dice_result:
+                return
+                
+            logger.info(f"몹 전투 주사위 처리: {dice_result.player_name} - {dice_result.dice_value}")
+            
+            # === 스킬 시스템과 연동된 주사위 처리 ===
+            final_dice_value = await self._process_skill_enhanced_dice(
+                dice_result, channel_id, message
+            )
+            
+            # 전투 로직에 최종 주사위 값 전달
+            await self._handle_battle_dice(battle, dice_result.player_name, final_dice_value)
+            
+        except Exception as e:
+            logger.error(f"몹 전투 주사위 처리 오류: {e}")
+
+    async def _process_skill_enhanced_dice(self, dice_result, channel_id: int, message: discord.Message) -> int:
+        """스킬 시스템이 적용된 주사위 처리"""
+        try:
+            from skills.skill_effects import skill_effects
+            
+            # 실제 유저 찾기
+            user_id = None
+            player_name = dice_result.player_name
+            
+            if message.guild:
+                for member in message.guild.members:
+                    if player_name in member.display_name:
+                        user_id = str(member.id)
+                        break
+            
+            if user_id:
+                # 스킬 효과 적용
+                final_value, skill_messages = await skill_effects.process_dice_roll(
+                    user_id, dice_result.dice_value, str(channel_id)
+                )
+                
+                # 스킬 효과 메시지 전송
+                if skill_messages:
+                    for skill_message in skill_messages:
+                        await message.channel.send(skill_message)
+                
+                # 값이 변경된 경우 알림
+                if final_value != dice_result.dice_value:
+                    change_msg = f"🎲 **{player_name}**님의 주사위 결과: {dice_result.dice_value} → **{final_value}**"
+                    await message.channel.send(change_msg)
+                
+                return final_value
+            
+            return dice_result.dice_value
+            
+        except Exception as e:
+            logger.error(f"스킬 강화 주사위 처리 오류: {e}")
+            return dice_result.dice_value
+
+    async def _handle_battle_dice(self, battle, player_name: str, dice_value: int):
+        """전투에서 주사위 결과 처리"""
+        try:
+            # 기존 전투 로직과 연동
+            # 여기서는 스킬이 적용된 최종 주사위 값으로 전투 처리
+            
+            # 예시: 공격/회피 처리
+            if battle.pending_action:
+                action_type = battle.pending_action.get("type")
+                
+                if action_type == "player_attack":
+                    # 플레이어 공격 처리
+                    await self._handle_player_attack(battle, player_name, dice_value)
+                elif action_type == "player_defense":
+                    # 플레이어 방어 처리
+                    await self._handle_player_defense(battle, player_name, dice_value)
+                elif action_type == "admin_attack":
+                    # Admin(몹) 공격 처리
+                    await self._handle_admin_attack(battle, player_name, dice_value)
+                    
+        except Exception as e:
+            logger.error(f"전투 주사위 처리 오류: {e}")
+
     def check_permission(self, user: discord.Member) -> bool:
         """권한 체크"""
         # ID 체크
@@ -1835,15 +2274,22 @@ class MobSetting(commands.Cog):
     
     def parse_dice_message(self, message_content: str) -> Optional[DiceResult]:
         """다이스 봇 메시지를 파싱하여 결과 추출"""
+        from collections import namedtuple
+        from typing import Optional
+        
+        # DiceResult namedtuple 정의
+        DiceResult = namedtuple('DiceResult', ['player_name', 'dice_value'])
+        
         normalized_content = ' '.join(message_content.split())
         pattern = r"`([^`]+)`님이.*?주사위를\s*굴\s*려.*?\*\*(\d+)\*\*.*?나왔습니다"
-        match = re.search(pattern, normalized_content)
         
+        match = re.search(pattern, normalized_content)
         if match:
             player_name = match.group(1).strip()
             # 추출된 이름을 real name으로 변환
             real_player_name = extract_real_name(player_name)
             dice_value = int(match.group(2))
+            
             return DiceResult(player_name=real_player_name, dice_value=dice_value)
         
         return None
@@ -1871,7 +2317,7 @@ class MobSetting(commands.Cog):
         
         # 몹의 주사위인지 확인
         if result.player_name == battle.mob_name:
-            # 몹의 공격 주사위 처리
+            # 몹의 공격 주사위 _sync_player_recovery_from_nickname
             if battle.pending_action["type"] == "combat" and battle.pending_action["phase"] == "mob_all_attack":
                 # 몹의 공격 주사위 값 저장
                 battle.pending_action["attack_roll"] = result.dice_value
@@ -1894,7 +2340,8 @@ class MobSetting(commands.Cog):
         
         # 회복 주사위
         elif battle.pending_action["type"] == "recovery":
-            await self.process_recovery_dice(battle, result)
+            if result.player_name in battle.pending_action["waiting_for"]:
+                await self.process_recovery_dice(battle, result)
         
         # 플레이어 턴 중 공격
         elif battle.pending_action["type"] == "player_turn":
@@ -2044,12 +2491,136 @@ class MobSetting(commands.Cog):
         battle.pending_action = None
         await view.process_turn()
 
+# mob_setting.py의 _sync_player_recovery_from_nickname 메서드 수정
 
+    async def _sync_player_recovery_from_nickname(self, battle: AutoBattle, player_name: str) -> bool:
+        """닉네임에서 체력을 읽어 회복이 있었는지 확인하고 전투에 반영"""
+        logger.info(f"[DEBUG] Syncing recovery for player: {player_name}")
+        
+        # 해당 플레이어 찾기
+        target_player = None
+        for player in battle.players:
+            if player.real_name == player_name:
+                target_player = player
+                break
+        
+        if not target_player:
+            logger.warning(f"[DEBUG] Player {player_name} not found")
+            return False
+        
+        try:
+            # ✅ 핵심 수정: Member 객체를 다시 fetch해서 최신 닉네임 가져오기
+            fresh_member = await battle.channel.guild.fetch_member(target_player.user.id)
+            current_nickname = fresh_member.display_name
+            logger.info(f"[DEBUG] Fresh nickname from server: {current_nickname}")
+            
+            # 기존 저장된 닉네임과 비교
+            old_nickname = target_player.user.display_name
+            if old_nickname != current_nickname:
+                logger.info(f"[DEBUG] Nickname changed: {old_nickname} -> {current_nickname}")
+            
+        except Exception as e:
+            logger.error(f"[DEBUG] Failed to fetch fresh member info: {e}")
+            # fallback to cached nickname
+            current_nickname = target_player.user.display_name
+        
+        logger.info(f"[DEBUG] Using nickname: {current_nickname}")
+        
+        try:
+            import re
+            # 닉네임 형태: "이름/현재체력/최대체력%" 패턴 매칭
+            health_pattern = r'/(\d+)/'
+            matches = re.findall(health_pattern, current_nickname)
+            
+            if len(matches) >= 1:
+                nickname_current_health = int(matches[0])  # 첫 번째 숫자가 현재 체력
+                stored_current_health = target_player.real_current_health
+                
+                logger.info(f"[DEBUG] Health comparison - nickname: {nickname_current_health}, stored: {stored_current_health}")
+                
+                # 회복 여부 확인 (닉네임 체력 > 저장된 체력)
+                if nickname_current_health > stored_current_health:
+                    recovery_amount = nickname_current_health - stored_current_health
+                    logger.info(f"[DEBUG] Recovery detected! Amount: {recovery_amount}")
+                    
+                    # 전투 체력 계산 및 적용
+                    battle_recovery = max(1, recovery_amount // 10)  # 최소 1은 회복
+                    
+                    # 체력 업데이트
+                    target_player.real_current_health = min(nickname_current_health, target_player.real_max_health)
+                    target_player.current_health = min(target_player.current_health + battle_recovery, target_player.max_health)
+                    target_player.hits_received = max(0, target_player.hits_received - battle_recovery)
+                    
+                    logger.info(f"[DEBUG] Applied recovery - battle: +{battle_recovery}, real: +{recovery_amount}")
+                    logger.info(f"[DEBUG] New health values - battle: {target_player.current_health}/{target_player.max_health}, real: {target_player.real_current_health}/{target_player.real_max_health}")
+                    
+                    # ✅ 추가: Member 객체도 업데이트해서 다음에 올바른 닉네임 사용
+                    try:
+                        target_player.user = fresh_member
+                        logger.info(f"[DEBUG] Updated player member object")
+                    except:
+                        pass
+                    
+                    # 회복 메시지 전송
+                    await battle.channel.send(
+                        f"💚 **{target_player.real_name} 회복 완료!**\n"
+                        f"실제 체력: +{recovery_amount} HP\n"
+                        f"전투 체력: +{battle_recovery} HP\n"
+                        f"현재 상태: {target_player.real_current_health}/{target_player.real_max_health} HP\n"
+                        f"⚔️ **전투에 반영되었습니다!**"
+                    )
+                    
+                    # 전투 상태 업데이트
+                    view = MobSettingView(battle)
+                    await battle.main_message.edit(embed=view.create_battle_status_embed())
+                    
+                    # 플레이어 턴 중이면 턴 종료
+                    if (battle.pending_action and 
+                        battle.pending_action.get("type") == "player_turn" and 
+                        battle.pending_action.get("player") == target_player):
+                        
+                        await battle.channel.send(f"⏭️ {target_player.real_name}님의 턴이 회복으로 인해 종료됩니다.")
+                        battle.current_turn_index += 1
+                        battle.pending_action = None
+                        await self.process_turn()
+                    
+                    return True
+            
+            logger.info(f"[DEBUG] No recovery detected (health unchanged)")
+            return False
+            
+        except Exception as e:
+            logger.error(f"[DEBUG] Error in recovery sync: {e}")
+            return False
+    
     async def process_recovery_dice(self, battle: AutoBattle, result: DiceResult):
         """회복 주사위 처리 (main.py의 auto_skip_turn_after_recovery 참고)"""
         logger.info(f"[DEBUG] process_recovery_dice called - player_name: {result.player_name}, dice_value: {result.dice_value}")
         logger.info(f"[DEBUG] Current pending_action: {battle.pending_action}")
         logger.info(f"[DEBUG] Battle players: {[p.real_name for p in battle.players]}")
+        
+        # ✅ 수정: dice_value가 0이거나 작을 때도 회복 동기화 시도
+        if result.dice_value <= 0:
+            logger.info(f"[DEBUG] Zero dice value - attempting recovery sync")
+            view = MobSettingView(battle)
+            success = await view._sync_player_recovery_from_nickname(battle, result.player_name)
+            if success:
+                logger.info(f"[DEBUG] Recovery sync successful for {result.player_name}")
+            else:
+                logger.info(f"[DEBUG] No recovery detected, trying alternative method")
+                # ✅ 추가: 다른 방법으로도 시도
+                await asyncio.sleep(1)  # 잠깐 기다린 후 다시 시도
+                success = await view._sync_player_recovery_from_nickname(battle, result.player_name)
+                if success:
+                    logger.info(f"[DEBUG] Recovery sync successful on second attempt")
+            return
+        
+        # 플레이어 턴이 아닌 경우도 회복 체크
+        if not battle.pending_action or battle.pending_action.get("type") != "player_turn":
+            logger.info(f"[DEBUG] Not a player turn, but checking for recovery sync")
+            view = MobSettingView(battle)
+            await view._sync_player_recovery_from_nickname(battle, result.player_name)
+            return
         
         # 플레이어 회복 처리
         for player in battle.players:
@@ -2059,45 +2630,57 @@ class MobSetting(commands.Cog):
                 logger.info(f"[DEBUG] Found matching player for recovery!")
                 
                 # pending_action 체크
-                if not battle.pending_action:
-                    logger.warning(f"[DEBUG] No pending_action!")
-                    return
-                
-                if battle.pending_action.get("type") != "player_turn":
-                    logger.warning(f"[DEBUG] pending_action type is not player_turn: {battle.pending_action.get('type')}")
-                    return
-                
                 if battle.pending_action.get("player") != player:
                     logger.warning(f"[DEBUG] pending_action player mismatch!")
                     return
                 
-                # 회복량 계산 (수정: 주사위값이 실제 회복량)
-                real_heal = result.dice_value  # 실제 회복량
-                battle_heal = real_heal // 10  # 전투 체력 회복량
+                # 회복량 계산
+                real_heal = result.dice_value
+                battle_heal = real_heal // 10
                 
-                # 0 회복량 방지 (최소 1)
                 if real_heal > 0 and battle_heal == 0:
                     battle_heal = 1
                 
-                logger.info(f"[DEBUG] Healing - real: {real_heal}, battle: {battle_heal}")
-                
-                # 회복 적용
-                old_health = player.current_health
-                old_real_health = player.real_current_health
-                player.heal(battle_heal, real_heal)
-                
-                logger.info(f"[DEBUG] Health after healing - battle: {old_health} -> {player.current_health}, real: {old_real_health} -> {player.real_current_health}")
-                
-                if real_heal > 0:
-                    await battle.channel.send(
-                        f"💚 **회복 성공!** {player.real_name}이(가) 체력을 회복했습니다!\n"
-                        f"전투 체력 회복: +{battle_heal} (현재: {player.current_health}/{player.max_health})\n"
-                        f"실제 체력 회복: +{real_heal} (현재: {player.real_current_health}/{player.real_max_health})"
-                    )
-                else:
+                # 최대 체력 체크
+                if player.real_current_health >= player.real_max_health:
+                    logger.info(f"[DEBUG] Player already at max health")
                     await battle.channel.send(
                         f"💚 {player.real_name}이(가) 회복을 시도했지만 이미 체력이 최대입니다!"
                     )
+                else:
+                    logger.info(f"[DEBUG] Healing - real: {real_heal}, battle: {battle_heal}")
+                    
+                    # 회복 적용
+                    old_health = player.current_health
+                    old_real_health = player.real_current_health
+                    player.heal(battle_heal, real_heal)
+                    
+                    logger.info(f"[DEBUG] Health after healing - battle: {old_health} -> {player.current_health}, real: {old_real_health} -> {player.real_current_health}")
+                    
+                    # 성공 메시지 표시
+                    await battle.channel.send(
+                        f"💚 **체력 회복**\n"
+                        f"회복물품을(를) 사용했습니다!\n"
+                        f"회복량\n"
+                        f"+{real_heal} HP\n"
+                        f"현재 체력\n"
+                        f"{player.real_current_health}/{player.real_max_health} HP\n"
+                        f"⚔️ **전투 효과**\n"
+                        f"회복으로 인해 턴을 소모했습니다!"
+                    )
+                    
+                    # 체력 동기화가 활성화된 경우 닉네임 즉시 업데이트
+                    if battle.health_sync:
+                        new_nickname = update_nickname_health(player.user.display_name, player.real_current_health)
+                        try:
+                            await player.user.edit(nick=new_nickname)
+                            logger.info(f"[DEBUG] Nickname updated to: {new_nickname}")
+                        except discord.Forbidden:
+                            logger.warning(f"[DEBUG] Failed to update nickname - no permission")
+                            player.nickname_update_failed = True
+                        except Exception as e:
+                            logger.error(f"[DEBUG] Failed to update nickname: {e}")
+                            player.nickname_update_failed = True
                 
                 # 메인 메시지 업데이트
                 view = MobSettingView(battle)
@@ -2106,25 +2689,11 @@ class MobSetting(commands.Cog):
                 # 턴 넘김 메시지
                 await battle.channel.send(f"⏭️💚 {player.real_name}님이 회복으로 턴을 소모했습니다.")
                 
-                # 플레이어 턴 종료 처리
-                logger.info(f"[DEBUG] Ending player turn after recovery")
-                player.has_acted_this_turn = True
-                battle.current_turn_index += 1
-                battle.pending_action = None
-                
-                # 타임아웃 태스크 취소 추가
-                if battle.timeout_task:
-                    battle.timeout_task.cancel()
-                    battle.timeout_task = None
-                
-                logger.info(f"[DEBUG] Turn index incremented to: {battle.current_turn_index}")
-                
-                # 다음 턴으로 진행
-                await asyncio.sleep(1)
-                await view.process_turn()
+                # 턴 종료 처리
+                await self.end_player_turn(battle)
                 return
-        
-        logger.warning(f"[DEBUG] No matching player found for recovery!")
+
+        logger.warning(f"[DEBUG] Player not found for recovery: {result.player_name}")
 
         
     async def handle_player_attack(self, battle: AutoBattle, player: AutoBattlePlayer, attack_roll: int):
@@ -2193,4 +2762,8 @@ class MobSetting(commands.Cog):
 # 봇에 통합하는 함수
 async def setup(bot):
     """봇에 몹 세팅 기능 추가"""
-    await bot.add_cog(MobSetting(bot))
+    try:
+        await bot.add_cog(MobSetting(bot))
+        logger.info("MobSetting Cog 로드 완료")
+    except Exception as e:
+        logger.error(f"MobSetting Cog 로드 실패: {e}")
