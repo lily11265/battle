@@ -16,7 +16,7 @@ class VolkenHandler(BaseSkillHandler):
     """
     
     def __init__(self):
-        super().__init__("볼켄", needs_target=False)
+        super().__init__("볼켄", needs_target=False, skill_type="special", priority=4)
     
     async def activate(self, interaction: discord.Interaction, target_id: str, duration: int):
         """스킬 활성화"""
@@ -55,6 +55,109 @@ class VolkenHandler(BaseSkillHandler):
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         else:
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+    
+    async def on_skill_start(self, channel_id: str, user_id: str):
+        """스킬 시작 시 화산 폭발 준비"""
+        logger.info(f"볼켄 화산 폭발 시작 - 채널: {channel_id}, 유저: {user_id}")
+        
+        from ..skill_manager import skill_manager
+        channel_state = skill_manager.get_channel_state(channel_id)
+        
+        if "special_effects" not in channel_state:
+            channel_state["special_effects"] = {}
+        
+        # 볼켄 상태 초기화
+        channel_state["special_effects"]["volken_eruption"] = {
+            "caster_id": user_id,
+            "current_phase": 1,
+            "selected_targets": [],
+            "rounds_remaining": 5
+        }
+        skill_manager.mark_dirty(channel_id)
+    
+    async def on_dice_roll(self, user_id: str, dice_value: int, context: Dict[str, Any]) -> int:
+        """주사위 굴림 시 볼켄 효과 적용"""
+        channel_id = context.get("channel_id")
+        if not channel_id:
+            return dice_value
+        
+        from ..skill_manager import skill_manager
+        channel_state = skill_manager.get_channel_state(str(channel_id))
+        volken_data = channel_state.get("special_effects", {}).get("volken_eruption")
+        
+        if not volken_data:
+            return dice_value
+        
+        phase = volken_data["current_phase"]
+        
+        # 1-3라운드: 모든 주사위 1로 고정
+        if 1 <= phase <= 3:
+            logger.info(f"볼켄 화산재 효과: {user_id}의 주사위가 1로 고정됨")
+            return 1
+        
+        # 4라운드: 선별 단계 (50 미만 선별)
+        elif phase == 4:
+            if dice_value < 50 and user_id not in volken_data["selected_targets"]:
+                volken_data["selected_targets"].append(user_id)
+                logger.info(f"볼켄 선별: {user_id}가 용암 대상으로 선별됨 (주사위: {dice_value})")
+            return dice_value
+        
+        # 5라운드: 선별된 대상은 불리한 값
+        elif phase == 5:
+            if user_id in volken_data["selected_targets"]:
+                # 선별된 대상은 주사위 값 절반
+                modified_value = max(1, dice_value // 2)
+                logger.info(f"볼켄 용암 공격: {user_id}의 주사위 {dice_value} → {modified_value}")
+                return modified_value
+        
+        return dice_value
+    
+    async def on_round_start(self, channel_id: str, round_num: int):
+        """라운드 시작 시 볼켄 단계 진행"""
+        from ..skill_manager import skill_manager
+        
+        channel_state = skill_manager.get_channel_state(str(channel_id))
+        volken_data = channel_state.get("special_effects", {}).get("volken_eruption")
+        
+        if not volken_data:
+            return
+        
+        # 단계 진행
+        volken_data["current_phase"] = min(5, volken_data["current_phase"] + 1)
+        volken_data["rounds_remaining"] -= 1
+        
+        phase = volken_data["current_phase"]
+        
+        # 단계별 메시지
+        phase_messages = {
+            1: "🌋 화산이 진동하기 시작합니다... 화산재가 하늘을 뒤덮습니다!",
+            2: "🌋 화산재가 짙어집니다. 모든 것이 어둠에 잠깁니다...",
+            3: "🌋 용암이 끓어오릅니다. 곧 폭발할 것 같습니다!",
+            4: "🌋 **선별 시작!** 약한 자들이 표적이 됩니다!",
+            5: "🌋 **화산 폭발!** 선별된 대상들에게 용암이 쏟아집니다!"
+        }
+        
+        if phase in phase_messages:
+            logger.info(f"볼켄 {phase}단계: {phase_messages[phase]}")
+        
+        # 5라운드 후 종료
+        if volken_data["rounds_remaining"] <= 0:
+            del channel_state["special_effects"]["volken_eruption"]
+            logger.info("볼켄 화산 폭발 종료")
+        
+        skill_manager.mark_dirty(channel_id)
+    
+    async def on_skill_end(self, channel_id: str, user_id: str):
+        """스킬 종료 시 정리"""
+        from ..skill_manager import skill_manager
+        
+        channel_state = skill_manager.get_channel_state(str(channel_id))
+        special_effects = channel_state.get("special_effects", {})
+        
+        if "volken_eruption" in special_effects:
+            del special_effects["volken_eruption"]
+            skill_manager.mark_dirty(channel_id)
+            logger.info(f"볼켄 화산 폭발 효과 제거 - 채널: {channel_id}")
 
 class VolkenConfirmView(discord.ui.View):
     """볼켄 스킬 확인 뷰"""
@@ -72,45 +175,43 @@ class VolkenConfirmView(discord.ui.View):
         
         await interaction.response.defer()
         
-        # 볼켄 스킬 시작
         from ..skill_manager import skill_manager
         channel_id = str(interaction.channel.id)
         
+        # 볼켄은 항상 5라운드
+        duration = 5
+        
         success = skill_manager.add_skill(
             channel_id, "볼켄", str(interaction.user.id),
-            interaction.user.display_name, "all", "모든 참가자", 5
+            interaction.user.display_name, "all", "전체", duration
         )
         
         if success:
-            # 볼켄 상태 초기화
-            channel_state = skill_manager.get_channel_state(channel_id)
-            if "special_effects" not in channel_state:
-                channel_state["special_effects"] = {}
-            
-            channel_state["special_effects"]["volken_eruption"] = {
-                "caster_id": str(interaction.user.id),
-                "caster_name": interaction.user.display_name,
-                "current_phase": 1,
-                "selected_targets": [],
-                "rounds_left": 5
-            }
-            skill_manager.mark_dirty(channel_id)
+            # 화산 폭발 시작
+            from . import get_skill_handler
+            handler = get_skill_handler("볼켄")
+            if handler:
+                await handler.on_skill_start(channel_id, str(interaction.user.id))
             
             embed = discord.Embed(
-                title="🌋 볼켄의 화산 폭발 시작!",
-                description=f"**{interaction.user.display_name}**이 볼켄의 힘을 해방합니다!\n\n"
-                           f"☁️ **1단계 시작**: 화산재가 하늘을 덮습니다\n"
-                           f"🎲 **효과**: 모든 주사위가 1로 고정됩니다\n"
-                           f"⏳ **남은 단계**: 4단계",
+                title="🌋 화산이 깨어났다!",
+                description=f"**{interaction.user.display_name}**이 볼켄의 힘으로 화산을 깨웠습니다!\n\n"
+                           f"앞으로 **5라운드** 동안 대재앙이 펼쳐집니다!",
                 color=discord.Color.dark_red()
+            )
+            
+            embed.add_field(
+                name="⚠️ 1단계 시작",
+                value="화산재가 하늘을 뒤덮기 시작합니다...\n"
+                      "모든 주사위가 1로 고정됩니다!",
+                inline=False
             )
             
             await interaction.followup.send(embed=embed)
             
-            # 공개 알림
+            # 공개 경고
             await interaction.followup.send(
-                "🌋 **경고!** 볼켄의 화산 폭발이 시작되었습니다! "
-                "앞으로 5라운드간 화산의 영향을 받게 됩니다!"
+                "🌋 **경고!** 볼켄의 화산이 폭발을 준비합니다! 5라운드 동안 대재앙이 계속됩니다!"
             )
         else:
             await interaction.followup.send("❌ 스킬 활성화에 실패했습니다.", ephemeral=True)
@@ -123,139 +224,3 @@ class VolkenConfirmView(discord.ui.View):
         
         await interaction.response.send_message("볼켄 스킬 사용을 취소했습니다.", ephemeral=True)
         self.stop()
-
-class VolkenHandler(BaseSkillHandler):
-    # ... (위의 코드 계속)
-    
-    async def on_dice_roll(self, user_id: str, dice_value: int, context: Dict[str, Any]) -> int:
-        """주사위 굴림 시 볼켄 효과 적용"""
-        from ..skill_manager import skill_manager
-        
-        channel_id = context.get("channel_id")
-        if not channel_id:
-            return dice_value
-        
-        channel_state = skill_manager.get_channel_state(str(channel_id))
-        volken_effect = channel_state.get("special_effects", {}).get("volken_eruption")
-        
-        if not volken_effect:
-            return dice_value
-        
-        current_phase = volken_effect["current_phase"]
-        
-        # 1-3단계: 모든 주사위 1로 고정
-        if 1 <= current_phase <= 3:
-            if dice_value != 1:
-                logger.info(f"볼켄 1-3단계 효과 - 주사위 {dice_value} → 1")
-                return 1
-        
-        # 4단계: 선별을 위한 정상 주사위, 하지만 50 미만시 선별 목록에 추가
-        elif current_phase == 4:
-            if dice_value < 50:
-                volken_effect["selected_targets"].append({
-                    "user_id": str(user_id),
-                    "dice_value": dice_value
-                })
-                skill_manager.mark_dirty(str(channel_id))
-        
-        return dice_value
-    
-    async def on_round_start(self, channel_id: str, round_num: int):
-        """라운드 시작 시 볼켄 단계 진행"""
-        from ..skill_manager import skill_manager
-        
-        channel_state = skill_manager.get_channel_state(str(channel_id))
-        volken_effect = channel_state.get("special_effects", {}).get("volken_eruption")
-        
-        if not volken_effect:
-            return
-        
-        current_phase = volken_effect["current_phase"]
-        
-        try:
-            from battle_admin import send_battle_message
-            
-            if current_phase == 1:
-                await send_battle_message(
-                    channel_id,
-                    "☁️ **볼켄 1단계**: 화산재가 하늘을 뒤덮습니다. (모든 주사위 1로 고정)"
-                )
-            elif current_phase == 2:
-                await send_battle_message(
-                    channel_id,
-                    "🌋 **볼켄 2단계**: 용암이 끓어오르기 시작합니다. (계속해서 주사위 1 고정)"
-                )
-            elif current_phase == 3:
-                await send_battle_message(
-                    channel_id,
-                    "🔥 **볼켄 3단계**: 마그마 챔버가 불안정해집니다. (마지막 주사위 1 고정 라운드)"
-                )
-            elif current_phase == 4:
-                await send_battle_message(
-                    channel_id,
-                    "⚡ **볼켄 4단계**: 용암 선별이 시작됩니다! 주사위를 굴려주세요! (50 미만시 다음 단계 집중공격 대상)"
-                )
-                volken_effect["selected_targets"] = []  # 선별 목록 초기화
-            elif current_phase == 5:
-                await self._execute_volken_final_attack(channel_id, volken_effect)
-            
-            volken_effect["current_phase"] += 1
-            volken_effect["rounds_left"] -= 1
-            
-            if volken_effect["rounds_left"] <= 0:
-                # 볼켄 종료
-                del channel_state["special_effects"]["volken_eruption"]
-                skill_manager.remove_skill(channel_id, "볼켄")
-            
-            skill_manager.mark_dirty(channel_id)
-            
-        except Exception as e:
-            logger.error(f"볼켄 단계 진행 실패: {e}")
-    
-    async def _execute_volken_final_attack(self, channel_id: str, volken_data: dict):
-        """볼켄 5단계 최종 공격"""
-        try:
-            from battle_admin import send_battle_message, damage_user
-            
-            selected_targets = volken_data.get("selected_targets", [])
-            
-            if not selected_targets:
-                await send_battle_message(
-                    channel_id,
-                    "🌋 **볼켄 5단계**: 용암이 모든 대상을 놓쳤습니다! (선별된 대상 없음)"
-                )
-                return
-            
-            await send_battle_message(
-                channel_id,
-                f"🌋 **볼켄 5단계 - 집중 용암 공격!**\n"
-                f"🎯 선별된 대상 {len(selected_targets)}명에게 용암 집중공격!"
-            )
-            
-            # 선별된 각 대상에게 집중공격 (기존 집중공격 시스템 활용)
-            for target in selected_targets:
-                user_id = target["user_id"]
-                original_dice = target["dice_value"]
-                
-                # 집중공격 피해 계산 (원래 주사위 값 기반)
-                attack_count = max(1, (50 - original_dice) // 10)  # 낮을수록 더 많은 공격
-                total_damage = attack_count * 15  # 공격당 15 피해
-                
-                try:
-                    from battle_admin import get_user_info
-                    user_info = await get_user_info(channel_id, user_id)
-                    user_name = user_info["display_name"] if user_info else "대상"
-                    
-                    await send_battle_message(
-                        channel_id,
-                        f"🔥 **{user_name}**에게 용암 집중공격 × {attack_count}회! "
-                        f"(원래 주사위: {original_dice}) → -{total_damage} HP"
-                    )
-                    
-                    await damage_user(channel_id, user_id, total_damage)
-                    
-                except Exception as e:
-                    logger.error(f"볼켄 개별 공격 실패 {user_id}: {e}")
-            
-        except Exception as e:
-            logger.error(f"볼켄 최종 공격 실패: {e}")
