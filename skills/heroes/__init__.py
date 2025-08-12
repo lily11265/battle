@@ -31,6 +31,11 @@ class BaseSkillHandler(ABC):
         """스킬 활성화 (하위 클래스에서 필수 구현)"""
         pass
     
+    async def on_skill_start(self, channel_id: str, user_id: str):
+        """스킬 시작 시 호출 (선택적 구현)"""
+        logger.info(f"{self.skill_name} 스킬 시작 - 채널: {channel_id}, 유저: {user_id}")
+        pass
+    
     async def on_dice_roll(self, user_id: str, dice_value: int, context: Dict[str, Any]) -> int:
         """주사위 굴림 시 호출 (값 보정)"""
         return dice_value
@@ -58,6 +63,7 @@ class BaseSkillHandler(ABC):
     
     async def on_skill_end(self, channel_id: str, user_id: str):
         """스킬 종료 시 호출"""
+        logger.info(f"{self.skill_name} 스킬 종료 - 채널: {channel_id}, 유저: {user_id}")
         pass
     
     async def check_activation_condition(self, channel_id: str, user_id: str) -> bool:
@@ -187,7 +193,7 @@ def get_skills_by_type(skill_type: str) -> List[str]:
 
 def get_skill_priority(skill_name: str) -> int:
     """스킬 우선순위 조회"""
-    return SKILL_PRIORITIES.get(skill_name, 99)
+    return SKILL_PRIORITIES.get(skill_name, 999)
 
 def preload_all_skills():
     """모든 스킬 미리 로딩 (선택적)"""
