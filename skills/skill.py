@@ -8,8 +8,9 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
+from dataclasses import dataclass
 from .skill_manager import skill_manager
 from .skill_effects import skill_effects
 from .heroes import (
@@ -21,6 +22,79 @@ from .heroes import (
 )
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class Skill:
+    """개별 스킬 클래스"""
+    name: str
+    user_id: str
+    user_name: str
+    target_id: str
+    target_name: str
+    duration: int
+    channel_id: str
+    activated_at: float = 0
+    
+    async def on_start(self):
+        """스킬 시작 시 호출되는 이벤트"""
+        try:
+            from skills.heroes import get_skill_handler
+            handler = get_skill_handler(self.name)
+            
+            if handler:
+                # on_skill_start 메서드가 있으면 호출
+                if hasattr(handler, 'on_skill_start'):
+                    await handler.on_skill_start(self.channel_id, self.user_id)
+                    logger.info(f"스킬 시작 이벤트 실행 완료: {self.name}")
+                else:
+                    logger.debug(f"스킬 {self.name}에 on_skill_start 메서드 없음")
+            else:
+                logger.warning(f"스킬 핸들러를 찾을 수 없음: {self.name}")
+                
+        except Exception as e:
+            logger.error(f"스킬 시작 이벤트 오류 ({self.name}): {e}")
+            # 오류가 발생해도 스킬 활성화는 계속됨
+    
+    async def on_end(self):
+        """스킬 종료 시 호출되는 이벤트"""
+        try:
+            from skills.heroes import get_skill_handler
+            handler = get_skill_handler(self.name)
+            
+            if handler:
+                # on_skill_end 메서드가 있으면 호출
+                if hasattr(handler, 'on_skill_end'):
+                    await handler.on_skill_end(self.channel_id, self.user_id)
+                    logger.info(f"스킬 종료 이벤트 실행 완료: {self.name}")
+                else:
+                    logger.debug(f"스킬 {self.name}에 on_skill_end 메서드 없음")
+            else:
+                logger.warning(f"스킬 핸들러를 찾을 수 없음: {self.name}")
+                
+        except Exception as e:
+            logger.error(f"스킬 종료 이벤트 오류 ({self.name}): {e}")
+    
+    def get_info(self) -> Dict[str, Any]:
+        """스킬 정보 반환"""
+        return {
+            "name": self.name,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "target_id": self.target_id,
+            "target_name": self.target_name,
+            "duration": self.duration,
+            "channel_id": self.channel_id,
+            "activated_at": self.activated_at
+        }
+    
+    def __str__(self) -> str:
+        """문자열 표현"""
+        return f"Skill({self.name} by {self.user_name} -> {self.target_name}, {self.duration} rounds)"
+    
+    def __repr__(self) -> str:
+        """개발자용 표현"""
+        return (f"Skill(name='{self.name}', user_id='{self.user_id}', "
+                f"target_id='{self.target_id}', duration={self.duration})")
 
 class SkillCog(commands.Cog):
     """스킬 시스템 명령어 Cog"""
@@ -654,6 +728,7 @@ class ConfirmationView(discord.ui.View):
 
 async def setup(bot):
     await bot.add_cog(SkillCog(bot))
+
 
 
 
