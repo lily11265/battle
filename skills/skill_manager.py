@@ -8,7 +8,7 @@ import logging
 import asyncio
 import sqlite3
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import aiofiles
 from threading import Lock
@@ -23,7 +23,8 @@ class SkillManager:
         self.base_dir = Path("skills")
         self.config_dir = self.base_dir / "config"
         self.data_dir = self.base_dir / "data"
-        
+        self.mob_setting_locks = {}  # 채널별 몹 설정 상태
+       
         # 메모리 캐시
         self._skill_states: Dict[str, Dict] = {}
         self._config: Dict = {}
@@ -775,7 +776,97 @@ class SkillManager:
         except Exception as e:
             logger.error(f"스킬 매니저 종료 오류: {e}")
 
-
+    def set_mob_setting_mode(self, channel_id: str, active: bool):
+        """몹 설정 모드 설정
+        
+        Args:
+            channel_id: 채널 ID
+            active: True면 몹 설정 모드 활성화, False면 해제
+        """
+        if active:
+            self.mob_setting_locks[channel_id] = True
+            logger.info(f"몹 설정 모드 활성화 - 채널: {channel_id}")
+        else:
+            if channel_id in self.mob_setting_locks:
+                del self.mob_setting_locks[channel_id]
+                logger.info(f"몹 설정 모드 해제 - 채널: {channel_id}")
+    
+    def is_mob_setting_active(self, channel_id: str) -> bool:
+        """몹 설정 모드 활성 여부 확인
+        
+        Args:
+            channel_id: 채널 ID
+            
+        Returns:
+            몹 설정 중이면 True
+        """
+        return self.mob_setting_locks.get(channel_id, False)
+    
+    def add_skill(self, channel_id: str, skill_name: str, user_id: str,
+                  user_name: str, target_id: str, target_name: str,
+                  duration: int) -> bool:
+        """스킬 추가 (몹 설정 체크 추가)"""
+        
+        # 몹 설정 중인지 확인
+        if self.is_mob_setting_active(channel_id):
+            logger.warning(f"몹 설정 중 스킬 사용 차단 - 채널: {channel_id}, 스킬: {skill_name}")
+            return False
+        
+        # 기존 권한 체크
+        if not self.check_skill_permission(user_id, skill_name):
+            logger.warning(f"권한 없음 - 유저: {user_id}, 스킬: {skill_name}")
+            return False
+        
+        # 채널 상태 가져오기
+        channel_state = self.get_channel_state(channel_id)
+        
+        # 스킬 중복 체크
+        if skill_name in channel_state["active_skills"]:
+            logger.warning(f"이미 활성화된 스킬: {skill_name} in {channel_id}")
+            return False
+        
+        # 스킬 추가
+        channel_state["active_skills"][skill_name] = {
+            "user_id": user_id,
+            "user_name": user_name,
+            "target_id": target_id,
+            "target_name": target_name,
+            "rounds_left": duration,
+            "activated_at": time.time()
+        }
+        
+        self.mark_dirty(channel_id)
+        
+        logger.info(f"스킬 활성화 성공: {skill_name} by {user_name} in {channel_id} for {duration} rounds")
+        
+        # 스킬 시작 이벤트 발생
+        asyncio.create_task(self._trigger_skill_start_event(channel_id, skill_name, user_id))
+        
+        return True
+    
+    async def _trigger_skill_start_event(self, channel_id: str, skill_name: str, user_id: str):
+        """스킬 시작 이벤트 트리거"""
+        try:
+            from skills.heroes import get_skill_handler
+            handler = get_skill_handler(skill_name)
+            
+            if handler and hasattr(handler, 'on_skill_start'):
+                await handler.on_skill_start(channel_id, user_id)
+                logger.info(f"스킬 시작 이벤트 발생 - {skill_name}")
+        except Exception as e:
+            logger.error(f"스킬 시작 이벤트 오류 ({skill_name}): {e}")
+    
+    def clear_mob_setting_locks(self):
+        """모든 몹 설정 잠금 해제 (서버 재시작 시 사용)"""
+        self.mob_setting_locks.clear()
+        logger.info("모든 몹 설정 잠금 해제됨")
+    
+    def get_mob_setting_status(self) -> Dict[str, bool]:
+        """모든 채널의 몹 설정 상태 반환"""
+        return self.mob_setting_locks.copy()
+    
 # 싱글톤 인스턴스
 skill_manager = SkillManager()
+
+
 
