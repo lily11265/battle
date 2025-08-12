@@ -19,11 +19,41 @@ class SkillEffects:
     def __init__(self):
         self._effect_cache: Dict[str, Any] = {}
         self._processing_lock = asyncio.Lock()
+        self._initialized = False  # 이 라인 추가
+
+    async def initialize(self):
+        """스킬 효과 시스템 초기화"""
+        try:
+            self._effect_cache.clear()
+            self._initialized = True
+            logger.info("스킬 효과 시스템 초기화 완료")
+        except Exception as e:
+            logger.error(f"스킬 효과 시스템 초기화 실패: {e}")
+            self._initialized = False
+            raise
     
+    def is_initialized(self) -> bool:
+        """초기화 상태 확인"""
+        return self._initialized
+    
+    async def clear_cache(self):
+        """캐시 정리"""
+        try:
+            async with self._processing_lock:
+                self._effect_cache.clear()
+                logger.info("스킬 효과 캐시 정리 완료")
+        except Exception as e:
+            logger.error(f"캐시 정리 실패: {e}")
+
     async def process_dice_roll(self, user_id: str, dice_value: int, 
                                channel_id: str) -> Tuple[int, List[str]]:
         """주사위 굴림 시 모든 스킬 효과 적용"""
         try:
+            # 초기화 체크 추가
+            if not self._initialized:
+                logger.warning("스킬 효과 시스템이 초기화되지 않았습니다.")
+                return dice_value, []
+            
             async with self._processing_lock:
                 user_id = str(user_id)
                 channel_id = str(channel_id)
@@ -67,14 +97,14 @@ class SkillEffects:
             return dice_value, []
     
     async def _apply_skill_effect(self, skill_name: str, skill_data: Dict,
-                                 user_id: str, dice_value: int,
-                                 channel_state: Dict) -> Tuple[int, Optional[str]]:
+                                user_id: str, dice_value: int,
+                                channel_state: Dict) -> Tuple[int, Optional[str]]:
         """개별 스킬 효과 적용"""
         try:
             caster_id = skill_data.get("user_id")
             target_id = skill_data.get("target_id")
             
-            # === 자기 자신 스킬 ===
+            # === 자기 자신에게만 적용되는 스킬들 ===
             
             if skill_name == "오닉셀" and user_id == caster_id:
                 new_value = max(50, min(150, dice_value))
@@ -91,66 +121,79 @@ class SkillEffects:
                 result = 0 if random.random() < 0.4 else 100
                 return result, f"🎲 콜 폴드 발동! 주사위가 {result}로 고정됩니다!"
             
-            # === 전역 효과 스킬 ===
+            elif skill_name == "그림" and user_id == caster_id:
+                # 그림 스킬: 주사위 1로 고정
+                return 1, f"🎨 그림의 저주로 주사위가 1로 고정됩니다!"
+            
+            elif skill_name == "로바" and user_id == caster_id:
+                # 로바 스킬: 주사위를 100으로 고정
+                return 100, f"👑 로바의 축복으로 주사위가 100으로 상승합니다!"
+            
+            elif skill_name == "스카넬" and user_id == caster_id:
+                # 스카넬 스킬: 주사위 * 2 (최대 200)
+                new_value = min(200, dice_value * 2)
+                if new_value != dice_value:
+                    return new_value, f"⚡ 스카넬의 전류로 주사위가 {new_value}로 증폭됩니다!"
+            
+            # === 대상 지정 스킬들 ===
+            
+            elif skill_name == "비렐라" and user_id == target_id:
+                # 비렐라 스킬: 대상의 주사위를 0으로 만듦
+                return 0, f"❄️ 비렐라의 빙결로 행동이 봉쇄됩니다!"
+            
+            # === 전역 효과 스킬들 ===
             
             elif skill_name == "오리븐":
-                # ✅ 올바른 Admin 판단 로직
-                caster_id = skill_data.get("user_id")
-                
-                # 스킬 사용자가 admin인지 확인
-                if caster_id == "admin":
-                    is_caster_monster = True
-                elif caster_id == "monster":
-                    is_caster_monster = True
-                else:
-                    # ✅ 실제 Discord ID로 admin 권한 확인
-                    is_caster_monster = skill_manager.is_admin(caster_id, "")
-                
-                # 현재 주사위를 굴린 사용자가 admin인지 확인
-                is_target_monster = user_id in ["monster", "admin"]
-                
-                should_apply_debuff = False
-                
-                if is_caster_monster:
-                    # ✅ Admin이 사용한 경우: 유저에게만 -10
-                    if not is_target_monster:
-                        should_apply_debuff = True
-                else:
-                    # ✅ 유저가 사용한 경우: Admin에게만 -10
-                    if is_target_monster:
-                        should_apply_debuff = True
-                
-                if should_apply_debuff:
-                    new_value = max(1, dice_value - 10)
-                    if new_value != dice_value:
-                        return new_value, f"🌀 오리븐의 효과로 주사위가 -10 감소합니다!"
-                
-                # ✅ 디버프가 적용되지 않는 경우 아무것도 반환하지 않음
-                return dice_value, None
-
-            
-            elif skill_name == "볼켄":
-                # 1-3라운드: 모든 주사위 1로 고정
-                volken_data = channel_state.get("special_effects", {}).get("volken_eruption", {})
-                if volken_data.get("current_phase", 0) <= 3:
-                    return 1, f"🌋 볼켄의 화산재로 주사위가 1로 고정됩니다!"
-            
-            # === 특수 처리 스킬 ===
-            
-            elif skill_name == "황야" and user_id == caster_id:
-                # 이중 행동은 별도 처리 필요
+                # 🔧 수정: 이 스킬은 새로운 핸들러 시스템(skills/heroes/oriven.py)에서 처리
+                # 중복 처리 방지를 위해 여기서는 건너뜀
+                # 실제 효과와 메시지는 OrivenHandler.on_dice_roll()에서 처리됨
                 pass
             
-            elif skill_name == "그림":
-                # 그림 준비 중이면 메시지만
-                if "grim_preparing" in channel_state.get("special_effects", {}):
-                    return dice_value, "💀 그림이 낫을 들어올립니다..."
+            elif skill_name == "볼켄":
+                # 볼켄 스킬: 1-3라운드 동안 모든 주사위 1로 고정
+                volken_data = channel_state.get("special_effects", {}).get("volken_eruption", {})
+                current_phase = volken_data.get("current_phase", 0)
+                if 1 <= current_phase <= 3:
+                    return 1, f"🌋 볼켄의 화산재로 주사위가 1로 고정됩니다! (단계 {current_phase}/6)"
             
-            return dice_value, None
+            elif skill_name == "젤다":
+                # 젤다 스킬: 모든 주사위를 50으로 고정
+                return 50, f"🔮 젤다의 마법으로 주사위가 50으로 안정화됩니다!"
+            
+            elif skill_name == "닉사라":
+                # 닉사라 스킬: 대결 시스템에서 처리
+                # 여기서는 일반적인 주사위 효과만 처리
+                nixara_duel = channel_state.get("special_effects", {}).get("nixara_duel")
+                if nixara_duel:
+                    # 대결 참가자인 경우 별도 처리 (닉사라 핸들러에서 처리)
+                    attacker_id = nixara_duel.get("attacker_id")
+                    defender_id = nixara_duel.get("defender_id")
+                    if user_id in [attacker_id, defender_id]:
+                        # 대결 시스템에서 처리하므로 여기서는 패스
+                        pass
+            
+            elif skill_name == "카론":
+                # 카론 스킬: 데미지 공유 (주사위에는 직접적인 영향 없음)
+                # 실제 데미지 공유는 전투 시스템에서 처리
+                pass
+            
+            elif skill_name == "넥시스":
+                # 넥시스 스킬: 확정 데미지 (주사위에는 영향 없음)
+                # 실제 효과는 전투 시스템에서 처리
+                pass
+            
+            # === 특수 효과들 ===
+            
+            # 다른 스킬들의 특수 효과도 여기서 처리할 수 있음
+            # 예: 상태 이상, 버프/디버프 등
             
         except Exception as e:
-            logger.error(f"스킬 효과 적용 실패 {skill_name}: {e}")
-            return dice_value, None
+            logger.error(f"스킬 효과 적용 실패 ({skill_name}): {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # 변화가 없는 경우 원본 값과 None 반환
+        return dice_value, None
     
     async def _apply_special_effects(self, user_id: str, dice_value: int,
                                     special_effects: Dict) -> Tuple[int, List[str]]:
