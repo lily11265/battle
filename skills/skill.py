@@ -30,7 +30,8 @@ class SkillCog(commands.Cog):
         self._skill_handlers: Dict = {}
         self._interaction_cache: Dict[str, datetime] = {}  # 중복 실행 방지
         self._target_cache: Dict[str, List] = {}  # 대상 목록 캐시
-    
+        self.command_cooldowns = {} 
+
     async def cog_load(self):
         """Cog 로딩 시 초기화"""
         await skill_manager.initialize()
@@ -55,9 +56,8 @@ class SkillCog(commands.Cog):
     
     # === 자동완성 함수들 ===
     
-    async def skill_autocomplete(self, interaction: discord.Interaction, 
-                                current: str) -> List[app_commands.Choice[str]]:
-        """스킬 자동완성"""
+    async def skill_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        """스킬 이름 자동완성"""
         try:
             user_id = str(interaction.user.id)
             channel_id = str(interaction.channel.id)
@@ -112,53 +112,53 @@ class SkillCog(commands.Cog):
         except Exception as e:
             logger.error(f"스킬 자동완성 오류: {e}")
             return []
-    
-    async def target_autocomplete(self, interaction: discord.Interaction,
-                                current: str) -> List[app_commands.Choice[str]]:
+        
+    async def target_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
         """대상 자동완성"""
         try:
-            # 선택된 스킬 확인
-            skill_name = None
-            for option in interaction.data.get("options", []):
-                if option["name"] == "영웅":
-                    skill_name = option["value"]
-                    break
-            
-            if not skill_name:
+            if not interaction.guild:
                 return []
             
-            skill_info = get_skill_info(skill_name)
-            if not skill_info.get("needs_target"):
-                return [app_commands.Choice(name="대상 선택 불필요", value="self")]
-            
-            # 대상 목록 가져오기
-            targets = await self._get_available_targets(interaction, skill_name)
-            
-            # 필터링 및 Choice 생성
             choices = []
-            for target in targets[:25]:
-                if not current or current.lower() in target["name"].lower():
+            
+            # 특수 대상들
+            special_targets = ["all_users", "all_monsters", "random"]
+            for target in special_targets:
+                if not current or current.lower() in target.lower():
+                    choices.append(app_commands.Choice(name=f"🎯 {target}", value=target))
+            
+            # 서버 멤버들 (최대 20명)
+            member_count = 0
+            for member in interaction.guild.members:
+                if member.bot:
+                    continue
+                
+                display_name = member.display_name
+                if not current or current.lower() in display_name.lower():
                     choices.append(
                         app_commands.Choice(
-                            name=target["display"],
-                            value=target["id"]
+                            name=f"👤 {display_name}",
+                            value=str(member.id)
                         )
                     )
+                    member_count += 1
+                    
+                    if member_count >= 20:  # 최대 20명으로 제한
+                        break
             
-            return choices
+            return choices[:25]  # Discord 제한
             
         except Exception as e:
             logger.error(f"대상 자동완성 오류: {e}")
             return []
-    
-    async def cancel_autocomplete(self, interaction: discord.Interaction,
-                                current: str) -> List[app_commands.Choice[str]]:
-        """취소할 스킬 자동완성 (ADMIN 전용)"""
+        
+    async def cancel_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        """취소할 스킬 자동완성 (Admin 전용)"""
         try:
             user_id = str(interaction.user.id)
             display_name = interaction.user.display_name
             
-            # ADMIN 체크
+            # Admin 권한 체크
             if not skill_manager.is_admin(user_id, display_name):
                 return []
             
@@ -178,8 +178,7 @@ class SkillCog(commands.Cog):
             
         except Exception as e:
             logger.error(f"취소 자동완성 오류: {e}")
-            return []
-    
+            return []      
     # === 메인 명령어 ===
     
     @app_commands.command(name="스킬", description="영웅의 힘을 빌려 전투합니다")
@@ -203,9 +202,9 @@ class SkillCog(commands.Cog):
         대상: Optional[str] = None,
         취소: Optional[str] = None
     ):
-        """스킬 명령어 메인 처리"""
+        """스킬 명령어 메인 처리 (몹 전투 완전 통합)"""
         try:
-            # 중복 실행 방지
+            # === 중복 실행 방지 ===
             if not await self._check_cooldown(interaction):
                 return
             
@@ -213,7 +212,7 @@ class SkillCog(commands.Cog):
             channel_id = str(interaction.channel.id)
             display_name = interaction.user.display_name
             
-            # 취소 옵션 처리 (ADMIN 전용)
+            # === 취소 옵션 처리 (ADMIN 전용) ===
             if 취소:
                 if not skill_manager.is_admin(user_id, display_name):
                     await interaction.response.send_message(
@@ -225,126 +224,266 @@ class SkillCog(commands.Cog):
                 await self._handle_skill_cancel(interaction, 취소)
                 return
             
-            # 전투 상태 확인
+            # === 전투 상태 확인 및 자동 활성화 ===
+            is_admin = skill_manager.is_admin(user_id, display_name)
             channel_state = skill_manager.get_channel_state(channel_id)
-            if not channel_state.get("battle_active", True):  # 기본값 True (테스트용)
-                # 실제로는 battle_admin과 연동하여 확인
-                pass
+            battle_active = channel_state.get("battle_active", False)
             
-            # 권한 확인
-            if not skill_manager.can_use_skill(user_id, 영웅, display_name):
+            # Admin이면서 몹 전투가 진행 중인 경우 자동 활성화
+            if is_admin and not battle_active:
+                mob_battle_active = await self._check_and_activate_mob_battle(channel_id)
+                if mob_battle_active:
+                    battle_active = True
+                    logger.info(f"Admin 스킬 사용으로 몹 전투 스킬 시스템 자동 활성화 - 채널: {channel_id}")
+            
+            # 일반 사용자는 전투 상태 필수
+            if not is_admin and not battle_active:
                 await interaction.response.send_message(
-                    f"❌ **{영웅}** 스킬을 사용할 권한이 없습니다.",
+                    "❌ 현재 전투가 진행되지 않습니다.",
                     ephemeral=True
                 )
                 return
             
-            # 스킬 핸들러 가져오기
+            # === 권한 확인 ===
+            if not skill_manager.can_use_skill(user_id, 영웅, display_name):
+                available_skills = skill_manager.get_user_allowed_skills(user_id) if not is_admin else list(SKILL_MODULE_MAP.keys())
+                
+                await interaction.response.send_message(
+                    f"❌ **{영웅}** 스킬을 사용할 권한이 없습니다.\n\n"
+                    f"**사용 가능한 스킬**: {', '.join(available_skills[:10])}{'...' if len(available_skills) > 10 else ''}",
+                    ephemeral=True
+                )
+                return
+            
+            # === 중복 스킬 체크 ===
+            active_skills = channel_state["active_skills"]
+            
+            # 이미 활성화된 스킬인지 확인
+            if 영웅 in active_skills:
+                existing_user = active_skills[영웅]["user_name"]
+                remaining_rounds = active_skills[영웅]["rounds_left"]
+                
+                await interaction.response.send_message(
+                    f"❌ **{영웅}** 스킬이 이미 활성화되어 있습니다.\n"
+                    f"**사용자**: {existing_user}\n"
+                    f"**남은 라운드**: {remaining_rounds}",
+                    ephemeral=True
+                )
+                return
+            
+            # 사용자가 이미 다른 스킬을 사용 중인지 확인
+            user_active_skill = None
+            for skill_name, skill_data in active_skills.items():
+                if skill_data["user_id"] == user_id:
+                    user_active_skill = skill_name
+                    break
+            
+            if user_active_skill:
+                await interaction.response.send_message(
+                    f"❌ 이미 **{user_active_skill}** 스킬을 사용 중입니다.\n"
+                    f"한 번에 하나의 스킬만 사용할 수 있습니다.",
+                    ephemeral=True
+                )
+                return
+            
+            # === 스킬 핸들러 가져오기 ===
             handler = get_skill_handler(영웅)
             if not handler:
                 await interaction.response.send_message(
-                    f"❌ **{영웅}** 스킬을 찾을 수 없습니다.",
+                    f"❌ **{영웅}** 스킬을 찾을 수 없습니다.\n"
+                    f"올바른 영웅 이름을 입력해주세요.",
                     ephemeral=True
                 )
                 return
             
-            # 대상 처리
-            target_id = 대상
-            target_name = "자기 자신"
+            # === 응답 지연 처리 ===
+            await interaction.response.defer()
             
-            if handler.needs_target:
-                if not 대상 or 대상 == "self":
-                    # 대상 선택 필요
-                    await self._show_target_selection(interaction, 영웅, 라운드)
-                    return
+            try:
+                # === 스킬 활성화 ===
+                success = await skill_manager.activate_skill(
+                    user_id=user_id,
+                    user_name=display_name,
+                    skill_name=영웅,
+                    channel_id=channel_id,
+                    duration_rounds=라운드,
+                    target=대상
+                )
                 
-                target_info = await self._get_target_info(interaction, 대상)
-                if target_info:
-                    target_name = target_info["name"]
-            
-            # 중요 스킬 확인창
-            if 영웅 in ["그림", "넥시스", "볼켄"]:
-                confirmed = await self._show_confirmation(interaction, 영웅)
-                if not confirmed:
-                    return
-            
-            # 스킬 활성화
-            success = skill_manager.add_skill(
-                channel_id, 영웅, user_id, display_name,
-                target_id, target_name, 라운드
-            )
-            
-            if not success:
-                await interaction.response.send_message(
-                    f"❌ 스킬 활성화 실패. 이미 같은 스킬이 사용 중이거나 다른 스킬을 사용 중입니다.",
-                    ephemeral=True
+                if success:
+                    # === 스킬 정보 가져오기 ===
+                    skill_info = get_skill_info(영웅)
+                    
+                    # === 성공 메시지 ===
+                    success_embed = discord.Embed(
+                        title=f"⚔️ {영웅} 스킬 발동!",
+                        description=f"**{display_name}**님이 **{영웅}**의 힘을 빌렸습니다!",
+                        color=discord.Color.gold()
+                    )
+                    
+                    success_embed.add_field(
+                        name="📊 스킬 정보",
+                        value=f"**타입**: {skill_info.get('type', 'Unknown')}\n"
+                              f"**지속 시간**: {라운드} 라운드\n"
+                              f"**설명**: {skill_info.get('description', '정보 없음')}",
+                        inline=False
+                    )
+                    
+                    if 대상:
+                        success_embed.add_field(
+                            name="🎯 대상",
+                            value=대상,
+                            inline=True
+                        )
+                    
+                    # 전투 타입별 추가 정보
+                    battle_type = channel_state.get("battle_type")
+                    if battle_type == "mob_battle":
+                        mob_name = channel_state.get("mob_name", "몹")
+                        success_embed.add_field(
+                            name="⚔️ 전투 정보",
+                            value=f"**몹 전투**: {mob_name}\n**Admin 스킬**: ✅",
+                            inline=True
+                        )
+                    
+                    success_embed.set_footer(text=f"스킬은 {라운드} 라운드 동안 지속됩니다.")
+                    
+                    await interaction.followup.send(embed=success_embed)
+                    
+                    # === 스킬 시작 이벤트 호출 ===
+                    try:
+                        await handler.on_skill_start(channel_id, user_id, 라운드)
+                    except Exception as e:
+                        logger.error(f"스킬 시작 이벤트 오류 ({영웅}): {e}")
+                    
+                    logger.info(f"스킬 활성화 성공 - 사용자: {display_name}, 스킬: {영웅}, 라운드: {라운드}, 채널: {channel_id}")
+                    
+                else:
+                    await interaction.followup.send(
+                        f"❌ **{영웅}** 스킬 활성화에 실패했습니다.\n"
+                        f"잠시 후 다시 시도해주세요."
+                    )
+                    
+            except Exception as e:
+                logger.error(f"스킬 활성화 처리 오류: {e}")
+                await interaction.followup.send(
+                    f"❌ 스킬 처리 중 오류가 발생했습니다: {str(e)[:100]}"
                 )
-                return
-            
-            # 스킬 효과 처리
-            await skill_effects.process_skill_activation(
-                channel_id, 영웅, user_id, target_id, 라운드
-            )
-            
-            # 스킬 활성화 메시지
-            await handler.activate(interaction, target_id, 라운드)
-            
-            # 공개 메시지
-            embed = self._create_skill_embed(영웅, display_name, target_name, 라운드)
-            
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embed)
-            else:
-                await interaction.response.send_message(embed=embed)
-            
-            logger.info(f"스킬 활성화: {영웅} by {display_name} in {channel_id}")
-            
+                
         except Exception as e:
-            logger.error(f"스킬 명령어 처리 실패: {e}", exc_info=True)
+            logger.error(f"스킬 명령어 오류: {e}")
+            import traceback
+            traceback.print_exc()
             
-            error_msg = "❌ 스킬 처리 중 오류가 발생했습니다."
-            if interaction.response.is_done():
-                await interaction.followup.send(error_msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(error_msg, ephemeral=True)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        "❌ 스킬 사용 중 오류가 발생했습니다.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        "❌ 스킬 사용 중 오류가 발생했습니다.",
+                        ephemeral=True
+                    )
+            except:
+                pass
     
     # === 보조 메서드들 ===
     
+    async def _check_and_activate_mob_battle(self, channel_id: str) -> bool:
+        """몹 전투 상태 확인 및 스킬 시스템 자동 활성화"""
+        try:
+            # main.py의 bot 인스턴스에서 mob_battles 확인
+            if hasattr(self.bot, 'mob_battles'):
+                channel_id_int = int(channel_id)
+                
+                if channel_id_int in self.bot.mob_battles:
+                    battle = self.bot.mob_battles[channel_id_int]
+                    
+                    # 전투가 활성화되어 있는지 확인
+                    if battle.is_active:
+                        # 스킬 시스템 자동 활성화
+                        channel_state = skill_manager.get_channel_state(channel_id)
+                        channel_state["battle_active"] = True
+                        channel_state["battle_type"] = "mob_battle"
+                        channel_state["mob_name"] = battle.mob_name
+                        channel_state["admin_can_use_skills"] = True
+                        
+                        await skill_manager._save_skill_states()
+                        
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"몹 전투 상태 확인 오류: {e}")
+            return False
+    
     async def _check_cooldown(self, interaction: discord.Interaction) -> bool:
-        """중복 실행 방지 (3초)"""
+        """중복 실행 방지 쿨다운 체크"""
         user_id = str(interaction.user.id)
-        now = datetime.now()
+        current_time = datetime.now().timestamp()
         
-        if user_id in self._interaction_cache:
-            last_time = self._interaction_cache[user_id]
-            if (now - last_time).total_seconds() < 3:
+        # 3초 쿨다운
+        if user_id in self.command_cooldowns:
+            last_used = self.command_cooldowns[user_id]
+            if current_time - last_used < 3:
                 await interaction.response.send_message(
-                    "⏱️ 잠시 후 다시 시도해주세요.",
+                    "❌ 스킬 명령어는 3초마다 사용할 수 있습니다.",
                     ephemeral=True
                 )
                 return False
         
-        self._interaction_cache[user_id] = now
+        self.command_cooldowns[user_id] = current_time
         return True
     
     async def _handle_skill_cancel(self, interaction: discord.Interaction, skill_name: str):
-        """스킬 취소 처리"""
+        """스킬 취소 처리 (ADMIN 전용)"""
         try:
             channel_id = str(interaction.channel.id)
+            channel_state = skill_manager.get_channel_state(channel_id)
             
-            if skill_manager.remove_skill(channel_id, skill_name):
+            if skill_name not in channel_state["active_skills"]:
                 await interaction.response.send_message(
-                    f"✅ **{skill_name}** 스킬이 취소되었습니다.",
-                    ephemeral=False
+                    f"❌ **{skill_name}** 스킬이 활성화되어 있지 않습니다.",
+                    ephemeral=True
                 )
+                return
+            
+            # 스킬 정보 가져오기
+            skill_data = channel_state["active_skills"][skill_name]
+            original_user = skill_data["user_name"]
+            
+            # 스킬 비활성화
+            success = await skill_manager.deactivate_skill(channel_id, skill_name)
+            
+            if success:
+                cancel_embed = discord.Embed(
+                    title="🚫 스킬 강제 취소",
+                    description=f"**Admin**이 **{skill_name}** 스킬을 취소했습니다.",
+                    color=discord.Color.orange()
+                )
+                
+                cancel_embed.add_field(
+                    name="📋 취소된 스킬 정보",
+                    value=f"**스킬**: {skill_name}\n"
+                          f"**원래 사용자**: {original_user}\n"
+                          f"**취소자**: {interaction.user.display_name}",
+                    inline=False
+                )
+                
+                await interaction.response.send_message(embed=cancel_embed)
+                
+                logger.info(f"Admin 스킬 취소 - 스킬: {skill_name}, 취소자: {interaction.user.display_name}")
             else:
                 await interaction.response.send_message(
-                    f"❌ **{skill_name}** 스킬을 찾을 수 없습니다.",
+                    f"❌ **{skill_name}** 스킬 취소에 실패했습니다.",
                     ephemeral=True
                 )
                 
         except Exception as e:
-            logger.error(f"스킬 취소 실패: {e}")
+            logger.error(f"스킬 취소 처리 오류: {e}")
             await interaction.response.send_message(
                 "❌ 스킬 취소 중 오류가 발생했습니다.",
                 ephemeral=True
@@ -514,8 +653,10 @@ class ConfirmationView(discord.ui.View):
         self.stop()
 
 async def setup(bot):
-    """Cog 등록"""
     await bot.add_cog(SkillCog(bot))
+
+
+
 
 
 
