@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "start_time": "2025-08-08T05:38:37.484835",
+    "end_time": "2025-08-08T05:38:40.290937",
+    "duration_seconds": 2.806102,
+    "summary": {
+      "total_tests": 24,
+      "passed": 24,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "success_rate": 100.0
+    }
+  },
+  "skill_tests": {
+    "콜 폴드": [
+      {
+        "test_type": "effect",
+        "status": "passed",
+        "duration": 0.01779770851135254,
+        "test_cases": [
+          {
+            "name": "가능한 결과값",
+            "input": "주사위 굴림 100회",
+            "expected": 

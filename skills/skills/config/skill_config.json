@@ -1,0 +1,99 @@
+{
+  "lucencia": {
+    "health_cost": 3,
+    "revival_health": 5
+  },
+  "priority_users": [
+    "1237738945635160104",
+    "1059908946741166120"
+  ],
+  "skill_users": {
+    "오닉셀": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "피닉스": [
+      "users_only"
+    ],
+    "오리븐": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "카론": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "스카넬": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "루센시아": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "비렐라": [
+      "admin",
+      "monster"
+    ],
+    "그림": [
+      "admin",
+      "monster"
+    ],
+    "닉사라": [
+      "admin",
+      "monster"
+    ],
+    "제룬카": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "넥시스": [
+      "1059908946741166120"
+    ],
+    "볼켄": [
+      "admin",
+      "monster"
+    ],
+    "단목": [
+      "all_users",
+      "admin",
+      "monster"
+    ],
+    "콜 폴드": [
+      "admin",
+      "monster"
+    ],
+    "황야": [
+      "admin",
+      "monster"
+    ],
+    "스트라보스": [
+      "all_users",
+      "admin",
+      "monster"
+    ]
+  },
+  "authorized_admins": [
+    "1007172975222603798",
+    "1090546247770832910"
+  ],
+  "authorized_nickname": "system | 시스템",
+  "system_settings": {
+    "auto_save_interval": 30,
+    "max_skill_duration": 10,
+    "enable_skill_logs": true,
+    "performance_mode": true
+  },
+  "phase1_skills": [
+    "오닉셀",
+    "피닉스",
+    "오리븐",
+    "카론"
+  ]
+}

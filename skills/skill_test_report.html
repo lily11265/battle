@@ -1,0 +1,664 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>스킬 시스템 테스트 보고서</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1, h2, h3 {
+            color: #333;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .summary-card {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+        .summary-card h3 {
+            margin: 0 0 10px 0;
+            color: #666;
+            font-size: 14px;
+        }
+        .summary-card .value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 0;
+        }
+        .passed { color: #28a745; }
+        .failed { color: #dc3545; }
+        .error { color: #ffc107; }
+        .skipped { color: #6c757d; }
+        .skill-results {
+            margin: 20px 0;
+        }
+        .skill-item {
+            background-color: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border-left: 4px solid #28a745;
+        }
+        .skill-item.failed {
+            border-left-color: #dc3545;
+        }
+        .test-case {
+            margin: 10px 0 10px 20px;
+            padding: 10px;
+            background-color: white;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+        }
+        .test-case.failed {
+            background-color: #fff5f5;
+            border-color: #f5c6cb;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric-box {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 스킬 시스템 테스트 보고서</h1>
+        <p>실행 시간: 2025-08-08 05:38:37 | 
+           소요 시간: 2.81초</p>
+        
+        <div class="summary">
+            <div class="summary-card">
+                <h3>총 테스트</h3>
+                <p class="value">24</p>
+            </div>
+            <div class="summary-card">
+                <h3>성공</h3>
+                <p class="value passed">24</p>
+            </div>
+            <div class="summary-card">
+                <h3>실패</h3>
+                <p class="value failed">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>에러</h3>
+                <p class="value error">0</p>
+            </div>
+            <div class="summary-card">
+                <h3>성공률</h3>
+                <p class="value">100.0%</p>
+            </div>
+        </div>
+        
+        <h2>📊 스킬별 테스트 결과</h2>
+        <div class="skill-results">
+
+            <div class="skill-item ">
+                <h3>그림 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>그림 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;그림&#x27;, &#x27;target&#x27;: &#x27;target_user&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>그림 준비 상태 설정</strong><br>
+                        입력: <code>special_effects</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>False</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>넥시스 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.011초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>넥시스 스킬 추가 (특별 권한)</strong><br>
+                        입력: <code>{&#x27;user&#x27;: &#x27;1059908946741166120&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>넥시스 활성화 상태</strong><br>
+                        입력: <code>active_skills</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>닉사라 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>닉사라 차원 유배 - 행동 불가</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>0</code><br>
+                        결과: <code>0</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>닉사라 메시지 출력</strong><br>
+                        입력: <code>[&#x27;닉사라의 차원 유배로 행동할 수 없습니다!&#x27;]</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>단목 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.011초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>단목 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;단목&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>단목 관통 준비 상태</strong><br>
+                        입력: <code>special_effects</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>False</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>루센시아 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.013초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>루센시아 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;루센시아&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>루센시아 활성화 상태</strong><br>
+                        입력: <code>active_skills</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>볼켄 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.013초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>볼켄 1단계 - 주사위 1 고정</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>볼켄 2단계 - 주사위 1 고정</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>볼켄 3단계 - 주사위 1 고정</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>볼켄 4단계 - 선별 단계</strong><br>
+                        입력: <code>phase</code><br>
+                        예상: <code>4</code><br>
+                        결과: <code>4</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>비렐라 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>비렐라 속박 - 행동 불가 (주사위 < 50)</strong><br>
+                        입력: <code>30</code><br>
+                        예상: <code>0</code><br>
+                        결과: <code>0</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>비렐라 저항 성공 (주사위 >= 50)</strong><br>
+                        입력: <code>75</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>0</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>저항 성공 후 속박 해제</strong><br>
+                        입력: <code>virella_bound</code><br>
+                        예상: <code>False</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>스카넬 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>스카넬 스킬 추가</strong><br>
+                        입력: <code>{&#x27;caster&#x27;: &#x27;test_user&#x27;, &#x27;target&#x27;: &#x27;target_user&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>스카넬 타겟 설정</strong><br>
+                        입력: <code>target_id</code><br>
+                        예상: <code>target_user</code><br>
+                        결과: <code>target_user</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>스트라보스 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.014초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정</strong><br>
+                        입력: <code>10</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>75</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정</strong><br>
+                        입력: <code>50</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>75</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정</strong><br>
+                        입력: <code>74</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>75</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>경계값</strong><br>
+                        입력: <code>75</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>75</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>정상 범위</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>100</code><br>
+                        결과: <code>100</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최대값 경계</strong><br>
+                        입력: <code>150</code><br>
+                        예상: <code>150</code><br>
+                        결과: <code>150</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최대값 보정</strong><br>
+                        입력: <code>200</code><br>
+                        예상: <code>150</code><br>
+                        결과: <code>150</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>오닉셀 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.013초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정</strong><br>
+                        입력: <code>10</code><br>
+                        예상: <code>50</code><br>
+                        결과: <code>50</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정 - 메시지 확인</strong><br>
+                        입력: <code>[&#x27;🔥 오닉셀의 힘으로 주사위가 50로 보정됩니다!&#x27;]</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정</strong><br>
+                        입력: <code>30</code><br>
+                        예상: <code>50</code><br>
+                        결과: <code>50</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최소값 보정 - 메시지 확인</strong><br>
+                        입력: <code>[&#x27;🔥 오닉셀의 힘으로 주사위가 50로 보정됩니다!&#x27;]</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>경계값 테스트</strong><br>
+                        입력: <code>50</code><br>
+                        예상: <code>50</code><br>
+                        결과: <code>50</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>정상 범위</strong><br>
+                        입력: <code>75</code><br>
+                        예상: <code>75</code><br>
+                        결과: <code>75</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>정상 범위</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>100</code><br>
+                        결과: <code>100</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최대값 경계</strong><br>
+                        입력: <code>150</code><br>
+                        예상: <code>150</code><br>
+                        결과: <code>150</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최대값 보정</strong><br>
+                        입력: <code>200</code><br>
+                        예상: <code>150</code><br>
+                        결과: <code>150</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>최대값 보정 - 메시지 확인</strong><br>
+                        입력: <code>[&#x27;🔥 오닉셀의 힘으로 주사위가 150로 보정됩니다!&#x27;]</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>극단값 테스트</strong><br>
+                        입력: <code>999</code><br>
+                        예상: <code>150</code><br>
+                        결과: <code>150</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>극단값 테스트 - 메시지 확인</strong><br>
+                        입력: <code>[&#x27;🔥 오닉셀의 힘으로 주사위가 150로 보정됩니다!&#x27;]</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>오리븐 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.020초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터→유저 디버프 (100)</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>90</code><br>
+                        결과: <code>90</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터→유저 디버프 (50)</strong><br>
+                        입력: <code>50</code><br>
+                        예상: <code>40</code><br>
+                        결과: <code>40</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터→유저 디버프 (11)</strong><br>
+                        입력: <code>11</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터→유저 디버프 (10)</strong><br>
+                        입력: <code>10</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터→유저 디버프 (5)</strong><br>
+                        입력: <code>5</code><br>
+                        예상: <code>1</code><br>
+                        결과: <code>1</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>몬스터 자신은 영향 없음</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>100</code><br>
+                        결과: <code>100</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>유저→몬스터 디버프</strong><br>
+                        입력: <code>100</code><br>
+                        예상: <code>90</code><br>
+                        결과: <code>90</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>제룬카 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>제룬카 스킬 추가</strong><br>
+                        입력: <code>{&#x27;caster&#x27;: &#x27;test_user&#x27;, &#x27;target&#x27;: &#x27;target_user&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>제룬카 활성화 상태</strong><br>
+                        입력: <code>special_effects</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>False</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>카론 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>카론 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;카론&#x27;, &#x27;target&#x27;: &#x27;all_users&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>카론 활성화 상태</strong><br>
+                        입력: <code>active_skills</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>콜 폴드 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.018초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>가능한 결과값</strong><br>
+                        입력: <code>주사위 굴림 100회</code><br>
+                        예상: <code>{0, 100}</code><br>
+                        결과: <code>{0, 100}</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>0 나올 확률 (40% ± 10%)</strong><br>
+                        입력: <code>37/100</code><br>
+                        예상: <code>30% ~ 50%</code><br>
+                        결과: <code>37.0%</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>100 나올 확률 (60% ± 10%)</strong><br>
+                        입력: <code>63/100</code><br>
+                        예상: <code>50% ~ 70%</code><br>
+                        결과: <code>63.0%</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>피닉스 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>피닉스 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;피닉스&#x27;, &#x27;user&#x27;: &#x27;test_user&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case ">
+                        ✅ <strong>피닉스 활성화 상태</strong><br>
+                        입력: <code>active_skills</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+</div></div>
+            <div class="skill-item ">
+                <h3>황야 (1/1 통과)</h3>
+
+                <div class="test-type">
+                    <h4>effect 테스트 (0.012초)</h4>
+
+                    <div class="test-case ">
+                        ✅ <strong>황야 스킬 추가</strong><br>
+                        입력: <code>{&#x27;skill&#x27;: &#x27;황야&#x27;}</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>True</code>
+                    </div>
+
+                    <div class="test-case failed">
+                        ❌ <strong>황야 이중 행동 준비</strong><br>
+                        입력: <code>special_effects</code><br>
+                        예상: <code>True</code><br>
+                        결과: <code>False</code>
+                    </div>
+</div></div>
+        <h2>⚡ 성능 메트릭</h2>
+        <div class="metrics">
+            <div class="metric-box">
+                <h3>처리 성능</h3>
+                <table>
+
+                    <tr>
+                        <td>Skill Creation Time</td>
+                        <td><strong>2.1078598499298096</strong></td>
+                    </tr>
+
+                    <tr>
+                        <td>Dice Processing Time</td>
+                        <td><strong>0.08774018287658691</strong></td>
+                    </tr>
+
+                    <tr>
+                        <td>Avg Processing Time</td>
+                        <td><strong>8.774018287658692e-05</strong></td>
+                    </tr>
+
+                    <tr>
+                        <td>Total Skills Created</td>
+                        <td><strong>1000</strong></td>
+                    </tr>
+
+                    <tr>
+                        <td>Total Dice Processed</td>
+                        <td><strong>1000</strong></td>
+                    </tr>
+
+                </table>
+            </div>
+
+    </div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "1404175628508463215": {
+    "active_skills": {},
+    "special_effects": {},
+    "battle_active": true,
+    "battle_type": "mob_battle",
+    "mob_name": "테스트몹",
+    "admin_can_use_skills": true,
+    "current_round": 3,
+    "last_round_processed": 2,
+    "disabled_skills": [],
+    "created_at": "2025-08-13T00:27:22.834896",
+    "last_updated": "2025-08-13T04:02:24.283389",
+    "skill_users": {}
+  }
+}
